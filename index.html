@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NBA Stat Poker</title>
+<style>
+  :root{
+    --felt:#0b5d3b; --felt-dark:#08432a; --gold:#e8c15c; --card-bg:#fff;
+    --card-border:#1a1a1a; --chip-red:#c0392b; --chip-blue:#2980b9; --chip-green:#27ae60;
+    --text:#f3f3f0; --muted:#b9c9bd;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:'Segoe UI',Arial,sans-serif; color:var(--text);
+    background:radial-gradient(circle at top, #1c1c1c, #000);
+    min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:16px;
+  }
+  h1{margin:6px 0 2px; font-size:1.5em; letter-spacing:1px;}
+  .subtitle{color:var(--muted); font-size:.85em; margin-bottom:12px;}
+  #app{width:100%; max-width:980px;}
+  .table{
+    background:radial-gradient(ellipse at center, var(--felt) 0%, var(--felt-dark) 100%);
+    border:10px solid #3a2415; border-radius:40px; padding:22px;
+    box-shadow:0 10px 40px rgba(0,0,0,.6), inset 0 0 60px rgba(0,0,0,.4);
+  }
+  .row{display:flex; justify-content:center; gap:14px; flex-wrap:wrap; margin:10px 0;}
+  .opponent-box{
+    background:rgba(0,0,0,.35); border:1px solid rgba(255,255,255,.15); border-radius:12px;
+    padding:8px 14px; text-align:center; min-width:150px;
+  }
+  .opponent-box .name{font-weight:600;}
+  .opponent-box .chips{color:var(--gold); font-size:.85em;}
+  .opponent-box.folded{opacity:.4;}
+  .opponent-box.acting{box-shadow:0 0 0 2px var(--gold);}
+  .hole-mini{display:flex; gap:4px; justify-content:center; margin-top:6px;}
+  .mini-card{
+    width:34px; height:48px; background:#222; border:1px solid #555; border-radius:5px;
+    display:flex; align-items:center; justify-content:center; font-size:.65em; color:#888;
+  }
+  .mini-card.revealed{background:#fff; color:#111; font-weight:600; font-size:.6em; text-align:center; padding:2px;}
+  .status-line{text-align:center; font-size:.9em; color:var(--muted); min-height:1.2em; margin:4px 0;}
+  .categories{
+    display:flex; gap:10px; justify-content:center; margin:16px 0; flex-wrap:wrap; min-height:110px;
+  }
+  .cat-card{
+    width:110px; height:100px; border-radius:10px; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; padding:6px; font-size:.78em;
+    transition:transform .3s ease;
+  }
+  .cat-card.hidden{background:repeating-linear-gradient(45deg,#333,#333 6px,#2a2a2a 6px,#2a2a2a 12px); border:2px dashed #555; color:#555;}
+  .cat-card.revealed{background:var(--card-bg); color:#111; border:2px solid var(--gold); box-shadow:0 4px 10px rgba(0,0,0,.4);}
+  .cat-card .icon{font-size:1.5em;}
+  .cat-card .label{font-weight:700; margin-top:2px;}
+  .pot-line{text-align:center; font-size:1.1em; margin:8px 0; color:var(--gold); font-weight:700;}
+  .hole-area{display:flex; justify-content:center; gap:16px; margin:18px 0 6px;}
+  .player-card{
+    width:150px; background:var(--card-bg); color:#111; border-radius:12px; padding:10px;
+    text-align:center; box-shadow:0 6px 16px rgba(0,0,0,.5); border:2px solid var(--card-border);
+  }
+  .player-card .pname{font-weight:800; font-size:.95em; line-height:1.1;}
+  .player-card .ppos{color:#777; font-size:.7em; margin-bottom:6px;}
+  .player-card .stat{font-size:.68em; display:flex; justify-content:space-between; padding:1px 4px;}
+  .player-card .stat b{color:#222;}
+  .you-line{text-align:center; font-weight:700; margin-top:4px;}
+  .actions{display:flex; justify-content:center; gap:10px; margin:16px 0; flex-wrap:wrap;}
+  button{
+    font-family:inherit; font-size:.95em; padding:10px 18px; border-radius:8px; border:none;
+    cursor:pointer; font-weight:700; transition:transform .1s ease;
+  }
+  button:hover{transform:translateY(-2px);}
+  button:disabled{opacity:.35; cursor:not-allowed; transform:none;}
+  .btn-fold{background:var(--chip-red); color:#fff;}
+  .btn-call{background:var(--chip-green); color:#fff;}
+  .btn-raise{background:var(--chip-blue); color:#fff;}
+  .btn-next{background:var(--gold); color:#111;}
+  .raise-box{display:flex; align-items:center; gap:6px;}
+  .raise-box input{width:80px; padding:8px; border-radius:6px; border:1px solid #555; font-size:.9em;}
+  #log{
+    background:rgba(0,0,0,.5); border-radius:10px; padding:8px 12px; max-height:130px;
+    overflow-y:auto; font-size:.78em; color:var(--muted); margin-top:10px;
+  }
+  #log div{padding:1px 0;}
+  #showdown{
+    background:rgba(0,0,0,.55); border-radius:12px; padding:14px; margin-top:14px;
+  }
+  table.breakdown{width:100%; border-collapse:collapse; font-size:.8em;}
+  table.breakdown th, table.breakdown td{border:1px solid rgba(255,255,255,.15); padding:6px 8px; text-align:center;}
+  table.breakdown th{background:rgba(255,255,255,.08);}
+  .winner-cell{background:rgba(232,193,92,.35); font-weight:700; box-shadow:inset 0 0 0 2px var(--gold);}
+  .rank-best{background:rgba(39,174,96,.35); color:#eafff0;}
+  .rank-mid{background:rgba(232,193,92,.18); color:#fff8e0;}
+  .rank-worst{background:rgba(192,57,43,.25); color:#ffe9e6;}
+  table.breakdown td small, table.breakdown td .pts{opacity:.75;}
+  #start-screen{text-align:center; padding:40px 16px;}
+  #start-screen select, #start-screen button{font-size:1em; padding:10px 16px; border-radius:8px; margin:8px;}
+  .rules{max-width:640px; margin:16px auto; font-size:.85em; color:var(--muted); text-align:left; line-height:1.5;}
+  .badge{display:inline-block; background:var(--gold); color:#111; border-radius:6px; padding:0 6px; font-size:.7em; margin-left:6px;}
+  .chase-meter{
+    max-width:560px; margin:4px auto 0; background:rgba(0,0,0,.35); border:1px solid rgba(255,255,255,.15);
+    border-radius:10px; padding:8px 14px; text-align:center; font-size:.8em; color:var(--muted);
+  }
+  .chase-meter b{color:var(--gold);}
+  .combo-pill{
+    display:inline-block; background:linear-gradient(135deg,#e8c15c,#c99a2e); color:#111;
+    border-radius:20px; padding:3px 12px; font-size:.72em; font-weight:800; margin:2px 4px;
+    box-shadow:0 2px 6px rgba(0,0,0,.4); letter-spacing:.3px;
+  }
+  .combo-pill.flush{background:linear-gradient(135deg,#5dade2,#2874a6); color:#fff;}
+  .bonus-line{text-align:center; margin-top:8px; font-size:.85em; color:var(--gold); font-weight:700;}
+</style>
+</head>
+<body>
+<h1>🏀 NBA Stat Poker</h1>
+<div class="subtitle">Texas Hold'em rules, NBA legends instead of cards, career stats instead of suits.</div>
+<div id="app"></div>
+
+<script>
+'use strict';
+
+/* ---------------- DATA ---------------- */
+// Approximate career regular-season stats (mock/rounded for gameplay, not exact box-score accurate).
+const POOL = [
+  {name:"LeBron James", pos:"SF", games:1492, points:41000, rebounds:11400, assists:11000, steals:2200, blocks:1100, threes:2300, ppg:27.1, rpg:7.5, apg:7.3},
+  {name:"Michael Jordan", pos:"SG", games:1072, points:32292, rebounds:6672, assists:5633, steals:2514, blocks:893, threes:581, ppg:30.1, rpg:6.2, apg:5.3},
+  {name:"Kareem Abdul-Jabbar", pos:"C", games:1560, points:38387, rebounds:17440, assists:5660, steals:1160, blocks:3189, threes:1, ppg:24.6, rpg:11.2, apg:3.6},
+  {name:"Wilt Chamberlain", pos:"C", games:1045, points:31419, rebounds:23924, assists:4643, steals:80, blocks:120, threes:0, ppg:30.1, rpg:22.9, apg:4.4},
+  {name:"Bill Russell", pos:"C", games:963, points:14522, rebounds:21620, assists:4100, steals:60, blocks:100, threes:0, ppg:15.1, rpg:22.5, apg:4.3},
+  {name:"Magic Johnson", pos:"PG", games:906, points:17707, rebounds:6559, assists:10141, steals:1724, blocks:374, threes:431, ppg:19.5, rpg:7.2, apg:11.2},
+  {name:"Larry Bird", pos:"SF", games:897, points:21791, rebounds:8974, assists:5695, steals:1556, blocks:755, threes:649, ppg:24.3, rpg:10.0, apg:6.3},
+  {name:"Kobe Bryant", pos:"SG", games:1346, points:33643, rebounds:5640, assists:6306, steals:1944, blocks:640, threes:1827, ppg:25.0, rpg:5.2, apg:4.7},
+  {name:"Tim Duncan", pos:"PF", games:1392, points:26496, rebounds:15091, assists:4225, steals:1025, blocks:3020, threes:15, ppg:19.0, rpg:10.8, apg:3.0},
+  {name:"Shaquille O'Neal", pos:"C", games:1207, points:28596, rebounds:13099, assists:3026, steals:739, blocks:2732, threes:1, ppg:23.7, rpg:10.9, apg:2.5},
+  {name:"Hakeem Olajuwon", pos:"C", games:1238, points:26946, rebounds:13748, assists:3058, steals:2162, blocks:3830, threes:20, ppg:21.8, rpg:11.1, apg:2.5},
+  {name:"Karl Malone", pos:"PF", games:1476, points:36928, rebounds:14968, assists:5248, steals:1500, blocks:1120, threes:85, ppg:25.0, rpg:10.1, apg:3.6},
+  {name:"John Stockton", pos:"PG", games:1504, points:19711, rebounds:4051, assists:15806, steals:3265, blocks:39, threes:845, ppg:13.1, rpg:2.7, apg:10.5},
+  {name:"Kevin Garnett", pos:"PF", games:1462, points:26071, rebounds:14662, assists:5445, steals:1859, blocks:2037, threes:224, ppg:17.8, rpg:10.0, apg:3.7},
+  {name:"Dirk Nowitzki", pos:"PF", games:1522, points:31560, rebounds:11489, assists:3651, steals:979, blocks:1215, threes:1982, ppg:20.7, rpg:7.5, apg:2.4},
+  {name:"Steve Nash", pos:"PG", games:1217, points:17387, rebounds:3140, assists:10335, steals:730, blocks:78, threes:1685, ppg:14.3, rpg:2.6, apg:8.5},
+  {name:"Allen Iverson", pos:"PG", games:914, points:24368, rebounds:3394, assists:5624, steals:1983, blocks:210, threes:979, ppg:26.7, rpg:3.7, apg:6.2},
+  {name:"Kevin Durant", pos:"SF", games:1080, points:29900, rebounds:7300, assists:4400, steals:940, blocks:1180, threes:2150, ppg:27.2, rpg:6.7, apg:4.1},
+  {name:"Stephen Curry", pos:"PG", games:950, points:24500, rebounds:4700, assists:6100, steals:1350, blocks:130, threes:3800, ppg:25.5, rpg:4.9, apg:6.4},
+  {name:"Chris Paul", pos:"PG", games:1300, points:21900, rebounds:4900, assists:12300, steals:2400, blocks:130, threes:2100, ppg:17.0, rpg:4.5, apg:9.5},
+  {name:"James Harden", pos:"SG", games:1100, points:26000, rebounds:5700, assists:7700, steals:1450, blocks:500, threes:2900, ppg:24.5, rpg:5.4, apg:7.2},
+  {name:"Russell Westbrook", pos:"PG", games:1200, points:25000, rebounds:8100, assists:8700, steals:1750, blocks:250, threes:1450, ppg:21.9, rpg:6.9, apg:8.4},
+  {name:"Giannis Antetokounmpo", pos:"PF", games:780, points:17800, rebounds:7300, assists:3600, steals:800, blocks:900, threes:500, ppg:23.1, rpg:9.4, apg:4.6},
+  {name:"Nikola Jokic", pos:"C", games:700, points:15500, rebounds:6900, assists:5100, steals:700, blocks:500, threes:700, ppg:22.6, rpg:10.1, apg:7.3},
+  {name:"Dwyane Wade", pos:"SG", games:1054, points:23165, rebounds:4966, assists:5785, steals:1638, blocks:782, threes:550, ppg:22.0, rpg:4.7, apg:5.4},
+  {name:"Dwight Howard", pos:"C", games:1242, points:17825, rebounds:14627, assists:1273, steals:913, blocks:1935, threes:6, ppg:14.4, rpg:11.8, apg:1.0},
+  {name:"Carmelo Anthony", pos:"SF", games:1260, points:28289, rebounds:6798, assists:2761, steals:1043, blocks:460, threes:2101, ppg:22.5, rpg:6.2, apg:2.7},
+  {name:"Ray Allen", pos:"SG", games:1300, points:24505, rebounds:5272, assists:4361, steals:1451, blocks:265, threes:2973, ppg:18.9, rpg:4.1, apg:3.4},
+  {name:"Reggie Miller", pos:"SG", games:1389, points:25279, rebounds:4489, assists:4141, steals:1503, blocks:306, threes:2560, ppg:18.2, rpg:3.0, apg:3.0},
+  {name:"Scottie Pippen", pos:"SF", games:1178, points:18940, rebounds:7494, assists:6135, steals:2307, blocks:838, threes:1052, ppg:16.1, rpg:6.4, apg:5.2},
+  {name:"Charles Barkley", pos:"PF", games:1073, points:23757, rebounds:12546, assists:4215, steals:1648, blocks:1032, threes:538, ppg:22.1, rpg:11.7, apg:3.9},
+  {name:"Patrick Ewing", pos:"C", games:1183, points:24815, rebounds:11607, assists:1745, steals:913, blocks:2894, threes:10, ppg:21.0, rpg:9.8, apg:1.9}
+].map((p,i)=>({...p, id:i}));
+
+const CATS = [
+  {key:'points', label:'Career Points', icon:'🏀', fmt:v=>v.toLocaleString()},
+  {key:'rebounds', label:'Career Rebounds', icon:'💪', fmt:v=>v.toLocaleString()},
+  {key:'assists', label:'Career Assists', icon:'🎯', fmt:v=>v.toLocaleString()},
+  {key:'games', label:'Games Played', icon:'📅', fmt:v=>v.toLocaleString()},
+  {key:'ppg', label:'Pts / Game', icon:'🔥', fmt:v=>v.toFixed(1)},
+  {key:'rpg', label:'Reb / Game', icon:'📊', fmt:v=>v.toFixed(1)},
+  {key:'apg', label:'Ast / Game', icon:'🤝', fmt:v=>v.toFixed(1)},
+  {key:'steals', label:'Career Steals', icon:'🕵️', fmt:v=>v.toLocaleString()},
+  {key:'blocks', label:'Career Blocks', icon:'🚫', fmt:v=>v.toLocaleString()},
+  {key:'threes', label:'Career 3PM', icon:'💦', fmt:v=>v.toLocaleString()}
+];
+
+// "Suits" — career/per-game pairs. Winning BOTH categories in a pair (when both happen
+// to be in play for the hand) triggers a Flush-style bonus, same way suited cards do.
+const FAMILY_PAIRS = [
+  {name:'Scoring Flush', keys:['points','ppg']},
+  {name:'Rebounding Flush', keys:['rebounds','rpg']},
+  {name:'Playmaking Flush', keys:['assists','apg']}
+];
+
+/* ---------------- HELPERS ---------------- */
+function shuffle(arr){
+  const a = arr.slice();
+  for(let i=a.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [a[i],a[j]]=[a[j],a[i]];
+  }
+  return a;
+}
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+// Percentile of a single player's stat value among the whole 32-player pool (0-100).
+// Lets you gauge "how strong is this hole card" without needing to see opponents' cards —
+// same way knowing you hold pocket Kings tells you your hand is strong before any reveal.
+function percentile(catKey, value){
+  const sorted = POOL.map(p=>p[catKey]).slice().sort((a,b)=>a-b);
+  let count = 0;
+  sorted.forEach(v=>{ if(v<=value) count++; });
+  return Math.round(100*count/sorted.length);
+}
+
+/* ---------------- GAME STATE ---------------- */
+const ANTE = 20;
+const START_CHIPS = 1000;
+
+let G = null; // game state
+let resolveHuman = null;
+let handInProgress = false;
+
+function makeGame(numOpponents){
+  const names = ["You"];
+  for(let i=1;i<=numOpponents;i++) names.push("CPU "+i);
+  return {
+    players: names.map((n,i)=>({
+      id:i, name:n, isAI:i!==0, chips:START_CHIPS, hole:[], folded:false,
+      roundBet:0, allIn:false
+    })),
+    pot:0,
+    handNum:0,
+    stage:'idle',
+    revealedCats:[],
+    log:[]
+  };
+}
+
+function logMsg(m){
+  G.log.unshift(m);
+  if(G.log.length>60) G.log.pop();
+}
+
+function activePlayers(){ return G.players.filter(p=>!p.folded); }
+
+/* ---------------- DEALING ---------------- */
+function dealNewHand(){
+  G.handNum++;
+  G.pot = 0;
+  G.stage = 'preflop';
+  G.revealedCats = [];
+  G.log = [];
+  G.players.forEach(p=>{ p.folded=false; p.roundBet=0; p.allIn=false; p.hole=[]; });
+
+  // remove broke players
+  G.players = G.players.filter(p=> p.id===0 || p.chips>0);
+
+  const deck = shuffle(POOL);
+  let idx=0;
+  G.players.forEach(p=>{ p.hole=[deck[idx++], deck[idx++]]; });
+
+  // pick 5 distinct categories for this hand: 3 flop, 1 turn, 1 river
+  G.handCats = shuffle(CATS).slice(0,5);
+
+  // collect ante
+  G.players.forEach(p=>{
+    const ante = Math.min(ANTE, p.chips);
+    p.chips -= ante;
+    G.pot += ante;
+  });
+  logMsg(`Hand #${G.handNum}: everyone antes $${ANTE}. Pot: $${G.pot}`);
+}
+
+/* ---------------- SCORING ---------------- */
+function scoreCategories(players, cats){
+  const n = players.length;
+  const breakdown = {};
+  const totals = {};
+  players.forEach(p=>{ breakdown[p.id]={}; totals[p.id]=0; });
+  cats.forEach(cat=>{
+    const vals = players.map(p=>({id:p.id, value:p.hole[0][cat.key]+p.hole[1][cat.key]}));
+    vals.sort((a,b)=>b.value-a.value);
+    let i=0;
+    while(i<vals.length){
+      let j=i;
+      while(j+1<vals.length && vals[j+1].value===vals[i].value) j++;
+      let pts=0;
+      for(let k=i;k<=j;k++) pts += (n-k);
+      pts /= (j-i+1);
+      for(let k=i;k<=j;k++){
+        breakdown[vals[k].id][cat.key] = {value: vals[k].value, points: pts};
+        totals[vals[k].id] += pts;
+      }
+      i=j+1;
+    }
+  });
+  return {breakdown, totals};
+}
+
+// Which categories did each player win outright (no tie), and did they complete
+// any "Flush" pair (both halves of a Scoring/Rebounding/Playmaking pair present
+// in this hand's 5 categories, and won both)? This is the "straights & flushes"
+// layer — named combos worth chasing on top of the raw category totals.
+function computeCombos(active, cats, breakdown){
+  const n = active.length;
+  const combos = {};
+  active.forEach(p=>{
+    const won = cats.filter(c => breakdown[p.id][c.key].points === n).map(c=>c.key);
+    const flushes = FAMILY_PAIRS.filter(fp =>
+      fp.keys.every(k => cats.some(c=>c.key===k)) && fp.keys.every(k => won.includes(k))
+    ).map(fp=>fp.name);
+    combos[p.id] = {won, flushes};
+  });
+  return combos;
+}
+
+function bonusForCombo(combo, catCount){
+  let mult = 0;
+  const labels = [];
+  const wonCount = combo.won.length;
+  if(wonCount>=5){ mult += 0.35; labels.push('SWEEP (5/5)'); }
+  else if(wonCount===4){ mult += 0.20; labels.push('DOMINANT (4/5)'); }
+  else if(wonCount===3){ mult += 0.10; labels.push('HAT TRICK (3/5)'); }
+  combo.flushes.forEach(name=>{ mult += 0.15; labels.push(name.toUpperCase()); });
+  return {mult: Math.min(mult, 0.6), labels};
+}
+
+/* ---------------- BETTING ---------------- */
+function currentMaxBet(){
+  return Math.max(0, ...G.players.filter(p=>!p.folded).map(p=>p.roundBet));
+}
+
+function applyFold(p){ p.folded = true; logMsg(`${p.name} folds.`); }
+function applyCall(p){
+  const need = currentMaxBet() - p.roundBet;
+  const pay = Math.min(need, p.chips);
+  p.chips -= pay; p.roundBet += pay; G.pot += pay;
+  if(p.chips===0) p.allIn = true;
+  logMsg(pay===0 ? `${p.name} checks.` : `${p.name} calls $${pay}.`);
+}
+function applyRaise(p, raiseTo){
+  const need = raiseTo - p.roundBet;
+  const pay = Math.min(need, p.chips);
+  p.chips -= pay; p.roundBet += pay; G.pot += pay;
+  if(p.chips===0) p.allIn = true;
+  logMsg(`${p.name} raises to $${p.roundBet}.`);
+}
+
+function aiDecide(p){
+  const active = activePlayers();
+  const cats = G.revealedCats;
+  const maxBet = currentMaxBet();
+  const need = maxBet - p.roundBet;
+  let strength = 0.5;
+  if(cats.length>0){
+    const {totals} = scoreCategories(active, cats);
+    const maxPossible = active.length; // max per category
+    const best = Math.max(...Object.values(totals));
+    strength = totals[p.id] / (maxPossible*cats.length);
+    if(totals[p.id]===best) strength = Math.max(strength, 0.7);
+  }
+  const bluff = Math.random() < 0.12;
+  const potOdds = need / Math.max(1, G.pot+need);
+
+  let action;
+  if(need===0){
+    action = (strength>0.55 || bluff) && Math.random()<0.35 && p.chips>0 ? 'raise' : 'call'; // "call" here = check
+  } else if(strength < 0.28 - (bluff?0.3:0) && potOdds > 0.18){
+    action = Math.random() < 0.75 ? 'fold' : 'call';
+  } else if((strength > 0.62 || bluff) && p.chips > need && Math.random() < 0.4){
+    action = 'raise';
+  } else {
+    action = 'call';
+  }
+
+  if(action==='fold'){ return {action:'fold'}; }
+  if(action==='raise'){
+    const raiseAmt = Math.max(20, Math.round(G.pot*0.4/10)*10);
+    const raiseTo = Math.min(p.chips+p.roundBet, maxBet + raiseAmt);
+    return {action:'raise', amount: raiseTo};
+  }
+  return {action:'call'};
+}
+
+async function bettingRound(){
+  const order = G.players.map(p=>p.id);
+  let acted = new Set();
+  let guard = 0;
+
+  while(guard++ < 200){
+    const active = G.players.filter(p=>!p.folded);
+    if(active.length<=1) break;
+
+    const maxBet = currentMaxBet();
+    const needsAction = order.find(pid=>{
+      const p = G.players.find(x=>x.id===pid);
+      if(!p || p.folded || p.allIn) return false;
+      return !acted.has(pid) || p.roundBet < maxBet;
+    });
+    if(needsAction===undefined) break;
+
+    const p = G.players.find(x=>x.id===needsAction);
+    render(p.id);
+
+    let result;
+    if(p.id===0){
+      result = await new Promise(res=>{ resolveHuman = res; });
+    } else {
+      await sleep(650);
+      result = aiDecide(p);
+    }
+
+    if(result.action==='fold'){ applyFold(p); }
+    else if(result.action==='raise'){ applyRaise(p, result.amount); acted = new Set(); }
+    else { applyCall(p); }
+
+    acted.add(p.id);
+    render();
+    await sleep(150);
+  }
+}
+
+/* ---------------- MAIN HAND FLOW ---------------- */
+async function playHand(){
+  handInProgress = true;
+  dealNewHand();
+  render();
+  await sleep(400);
+
+  const stages = [
+    {name:'flop', count:3},
+    {name:'turn', count:1},
+    {name:'river', count:1}
+  ];
+
+  for(const st of stages){
+    if(activePlayers().length<=1) break;
+    G.stage = st.name;
+    for(let i=0;i<st.count;i++){
+      G.revealedCats.push(G.handCats[G.revealedCats.length]);
+    }
+    logMsg(`--- ${st.name.toUpperCase()} ---  ` + G.revealedCats.slice(-st.count).map(c=>c.label).join(', '));
+    G.players.forEach(p=>{ p.roundBet=0; });
+    render();
+    await sleep(300);
+    await bettingRound();
+  }
+
+  await showdown();
+  handInProgress = false;
+}
+
+async function showdown(){
+  G.stage = 'showdown';
+  const active = activePlayers();
+
+  if(active.length===1){
+    const winner = active[0];
+    winner.chips += G.pot;
+    logMsg(`${winner.name} wins $${G.pot} (everyone else folded).`);
+    G.lastResult = {breakdown:null, totals:null, winners:[winner.id], uncontested:true};
+    render();
+    return;
+  }
+
+  const {breakdown, totals} = scoreCategories(active, G.handCats);
+  const best = Math.max(...Object.values(totals));
+  const winners = active.filter(p=>totals[p.id]===best).map(p=>p.id);
+  const combos = computeCombos(active, G.handCats, breakdown);
+
+  const share = Math.floor(G.pot/winners.length);
+  let bonusTotal = 0;
+  const bonusLog = [];
+  winners.forEach(id=>{
+    const player = G.players.find(p=>p.id===id);
+    const {mult, labels} = bonusForCombo(combos[id], G.handCats.length);
+    const bonus = Math.round(share*mult);
+    player.chips += share + bonus;
+    bonusTotal += bonus;
+    if(labels.length) bonusLog.push(`${player.name}: ${labels.join(' + ')} → +$${bonus} bonus`);
+  });
+
+  logMsg(`Showdown! ${winners.map(id=>G.players.find(p=>p.id===id).name).join(' & ')} win the $${G.pot} pot${bonusTotal? ` (+$${bonusTotal} combo bonus)`:''}.`);
+  bonusLog.forEach(l=>logMsg('🔥 '+l));
+
+  G.lastResult = {breakdown, totals, winners, uncontested:false, combos, bonusLog};
+  render();
+}
+
+/* ---------------- UI ---------------- */
+function humanAction(action, amount){
+  if(!resolveHuman) return;
+  const r = resolveHuman;
+  resolveHuman = null;
+  r({action, amount});
+}
+
+function renderStart(){
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div id="start-screen">
+      <h2>Ready to play?</h2>
+      <p>Each player gets 2 "hole" NBA legends. Five stat categories flip like flop/turn/river.
+      Best combined stats across the revealed categories wins the pot.</p>
+      <div>
+        Opponents:
+        <select id="numOpp">
+          <option value="1">1 CPU opponent</option>
+          <option value="2" selected>2 CPU opponents</option>
+        </select>
+      </div>
+      <button class="btn-next" onclick="startGame()">Deal Me In</button>
+      <div class="rules">
+        <b>Rules:</b> Everyone antes $${ANTE} into the pot each hand. Three stat categories reveal on the
+        "flop", then one on the "turn", one on the "river" — with a betting round after each, just like
+        Hold'em (check/call, raise, or fold). At showdown, each active player's two hole players' stats are
+        summed for every revealed category; the player who ranks #1 in the most categories (by total rank
+        points) wins the pot. Ties split it.
+        <br><br>
+        <b>Combos to chase:</b> win 3 of the 5 categories for a <b>Hat Trick</b> (+10% pot bonus), 4 for
+        <b>Dominant</b> (+20%), or all 5 for a <b>Sweep</b> (+35%). If both halves of a Scoring
+        (points + pts/game), Rebounding (rebounds + reb/game), or Playmaking (assists + ast/game) pair
+        land in the same hand and you win both, that's a <b>Flush</b> (+15%) — watch the "Combo Watch"
+        panel during the hand to see which flushes are still live.
+      </div>
+    </div>`;
+}
+
+function startGame(){
+  const n = parseInt(document.getElementById('numOpp').value,10);
+  G = makeGame(n);
+  playHand();
+}
+
+function nextHand(){
+  if(G.players.find(p=>p.id===0).chips<=0){
+    document.getElementById('app').insertAdjacentHTML('beforeend',
+      `<div style="text-align:center;margin-top:16px;"><h2>You're out of chips!</h2>
+       <button class="btn-next" onclick="renderStart()">Play Again</button></div>`);
+    return;
+  }
+  playHand();
+}
+
+function render(actingId){
+  if(!G){ renderStart(); return; }
+  const app = document.getElementById('app');
+  const human = G.players.find(p=>p.id===0);
+  const opponents = G.players.filter(p=>p.id!==0);
+
+  const oppHtml = opponents.map(p=>`
+    <div class="opponent-box ${p.folded?'folded':''} ${actingId===p.id?'acting':''}">
+      <div class="name">${p.name}</div>
+      <div class="chips">$${p.chips}${p.allIn?' (all-in)':''}</div>
+      <div class="hole-mini">
+        ${p.hole.length? [0,1].map(i=>{
+          const revealed = G.stage==='showdown' && !p.folded;
+          return revealed
+            ? `<div class="mini-card revealed">${p.hole[i].name.split(' ').slice(-1)[0]}</div>`
+            : `<div class="mini-card">🂠</div>`;
+        }).join('') : ''}
+      </div>
+    </div>`).join('');
+
+  const catHtml = G.handCats ? G.handCats.map(c=>{
+    const revealed = G.revealedCats.includes(c);
+    return revealed
+      ? `<div class="cat-card revealed"><div class="icon">${c.icon}</div><div class="label">${c.label}</div></div>`
+      : `<div class="cat-card hidden"><div class="icon">?</div></div>`;
+  }).join('') : '';
+
+  const holeHtml = human.hole.length ? human.hole.map(pl=>`
+    <div class="player-card">
+      <div class="pname">${pl.name}</div>
+      <div class="ppos">${pl.pos}</div>
+      ${G.handCats.map(c=>{
+        const pct = percentile(c.key, pl[c.key]);
+        const pctColor = pct>=75 ? '#1e8449' : pct>=45 ? '#8a6d00' : '#a93226';
+        return `<div class="stat"><span>${c.icon} ${c.label}</span><span><b>${c.fmt(pl[c.key])}</b> <small style="color:${pctColor};font-weight:700;">${pct}%ile</small></span></div>`;
+      }).join('')}
+    </div>`).join('') : '';
+
+  // Combo Watch: which Flush-style pairs are "live" this hand (fair to show — it's
+  // only about your own hole cards + which categories are in the deck this hand,
+  // never opponents' hidden cards).
+  let comboWatchHtml = '';
+  if(G.handCats && G.stage!=='showdown' && G.stage!=='idle'){
+    const live = FAMILY_PAIRS.filter(fp => fp.keys.every(k => G.handCats.some(c=>c.key===k)));
+    if(live.length){
+      comboWatchHtml = `<div class="chase-meter">🎯 <b>Combo Watch:</b> ${live.map(fp=>{
+        const catsForPair = fp.keys.map(k=>G.handCats.find(c=>c.key===k));
+        const revealedCount = catsForPair.filter(c=>G.revealedCats.includes(c)).length;
+        const statusTxt = revealedCount===2 ? 'both revealed — check the breakdown at showdown!' : revealedCount===1 ? '1 of 2 revealed, still live' : 'not revealed yet';
+        return `${fp.name} (${catsForPair.map(c=>c.icon).join('')}) — ${statusTxt}`;
+      }).join(' &nbsp;|&nbsp; ')}</div>`;
+    } else {
+      comboWatchHtml = `<div class="chase-meter">No Flush pairs live this hand — chase a Hat Trick or Sweep instead (win 3+ of the 5 categories).</div>`;
+    }
+  }
+
+  const maxBet = currentMaxBet();
+  const need = human.folded ? 0 : maxBet - human.roundBet;
+  const humanTurn = actingId===0 && !human.folded;
+
+  const actionsHtml = humanTurn ? `
+    <div class="actions">
+      <button class="btn-fold" onclick="humanAction('fold')">Fold</button>
+      <button class="btn-call" onclick="humanAction('call')">${need>0? 'Call $'+need : 'Check'}</button>
+      <div class="raise-box">
+        <input type="number" id="raiseAmt" min="${maxBet+20}" max="${human.chips+human.roundBet}" step="10" value="${maxBet+40}">
+        <button class="btn-raise" onclick="doRaise()">Raise</button>
+      </div>
+    </div>` : (G.stage==='showdown' ? `<div class="actions"><button class="btn-next" onclick="nextHand()">Next Hand</button></div>` : `<div class="status-line">Waiting on other players…</div>`);
+
+  let showdownHtml = '';
+  if(G.stage==='showdown' && G.lastResult){
+    if(G.lastResult.uncontested){
+      showdownHtml = `<div id="showdown"><b>${G.players.find(p=>p.id===G.lastResult.winners[0]).name} takes the pot uncontested.</b></div>`;
+    } else {
+      const active = activePlayers();
+      const {breakdown, totals, winners, combos, bonusLog} = G.lastResult;
+      const n = active.length;
+      showdownHtml = `<div id="showdown"><h3>Showdown Breakdown</h3>
+        <table class="breakdown"><thead><tr><th>Category</th>${active.map(p=>`<th>${p.name}<br><small>${p.hole.map(h=>h.name).join(' / ')}</small></th>`).join('')}</tr></thead>
+        <tbody>
+        ${G.handCats.map(c=>{
+          // rank cells within this row so the best value glows green, worst glows red
+          const rowVals = active.map(p=>({id:p.id, value:breakdown[p.id][c.key].value}));
+          const maxV = Math.max(...rowVals.map(r=>r.value));
+          const minV = Math.min(...rowVals.map(r=>r.value));
+          return `<tr><td>${c.icon} ${c.label}</td>${active.map(p=>{
+            const b = breakdown[p.id][c.key];
+            const cls = n>1 ? (b.value===maxV ? 'rank-best' : b.value===minV ? 'rank-worst' : 'rank-mid') : '';
+            return `<td class="${cls}">${c.fmt(b.value)} <small>(${b.points.toFixed(1)}pt)</small></td>`;
+          }).join('')}</tr>`;
+        }).join('')}
+        <tr><th>Total</th>${active.map(p=>`<th class="${winners.includes(p.id)?'winner-cell':''}">${totals[p.id].toFixed(1)}</th>`).join('')}</tr>
+        <tr><td>Combos</td>${active.map(p=>{
+          const c = combos[p.id];
+          const pills = [
+            ...(c.won.length>=5 ? ['<span class="combo-pill">SWEEP</span>'] :
+                c.won.length===4 ? ['<span class="combo-pill">DOMINANT</span>'] :
+                c.won.length===3 ? ['<span class="combo-pill">HAT TRICK</span>'] : []),
+            ...c.flushes.map(f=>`<span class="combo-pill flush">${f.toUpperCase()}</span>`)
+          ];
+          return `<td>${pills.length? pills.join(' ') : '<small style="opacity:.5;">—</small>'}</td>`;
+        }).join('')}</tr>
+        </tbody></table>
+        <p style="text-align:center;margin-top:8px;"><b>${winners.map(id=>G.players.find(p=>p.id===id).name).join(' & ')} win${winners.length===1?'s':''} the pot!</b></p>
+        ${bonusLog && bonusLog.length ? `<div class="bonus-line">${bonusLog.map(l=>'🔥 '+l).join('<br>')}</div>` : ''}
+        </div>`;
+    }
+  }
+
+  app.innerHTML = `
+    <div class="table">
+      <div class="row">${oppHtml}</div>
+      <div class="status-line">Stage: ${G.stage.toUpperCase()} — Hand #${G.handNum}</div>
+      <div class="categories">${catHtml}</div>
+      <div class="pot-line">💰 Pot: $${G.pot}</div>
+      ${comboWatchHtml}
+      <div class="hole-area">${holeHtml}</div>
+      <div class="you-line">You — $${human.chips}${human.folded?' (folded)':''}</div>
+      ${actionsHtml}
+      ${showdownHtml}
+      <div id="log">${G.log.map(l=>`<div>${l}</div>`).join('')}</div>
+    </div>`;
+}
+
+function doRaise(){
+  const input = document.getElementById('raiseAmt');
+  const amt = parseInt(input.value,10);
+  humanAction('raise', amt);
+}
+
+/* ---------------- INIT ---------------- */
+renderStart();
+</script>
+</body>
+</html>
