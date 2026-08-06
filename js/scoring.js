@@ -38,35 +38,3 @@ export function scoreCategories(players, cats){
   });
   return {breakdown, totals};
 }
-
-// Which categories did each player win outright (no tie)? Named combos (Dominant,
-// Sweep) are worth chasing on top of the raw category totals.
-/**
- * @param {import('./state.js').GamePlayer[]} active
- * @param {import('./data.js').Category[]} cats
- * @param {Object<number, Object<string, import('./state.js').CategoryScore>>} breakdown
- * @returns {Object<number, import('./state.js').ComboInfo>}
- */
-export function computeCombos(active, cats, breakdown){
-  const n = active.length;
-  /** @type {Object<number, import('./state.js').ComboInfo>} */
-  const combos = {};
-  active.forEach(p=>{
-    const won = cats.filter(c => breakdown[p.id][c.key].points === n).map(c=>c.key);
-    combos[p.id] = {won};
-  });
-  return combos;
-}
-
-/**
- * @param {import('./state.js').ComboInfo} combo
- * @returns {{mult: number, labels: string[]}}
- */
-export function bonusForCombo(combo){
-  let mult = 0;
-  const labels = [];
-  const wonCount = combo.won.length;
-  if(wonCount>=5){ mult += 0.35; labels.push('SWEEP (5/5)'); }
-  else if(wonCount===4){ mult += 0.20; labels.push('DOMINANT (4/5)'); }
-  return {mult, labels};
-}

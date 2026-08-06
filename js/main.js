@@ -4,8 +4,8 @@
 // call need to exist as globals — bridge them here rather than scattering `window.x =`
 // assignments through ui.js.
 
-import { renderStart, startGame, humanAction, doRaise, nextHand } from './ui.js';
+import { renderStart, startGame, humanAction, doRaise, nextRound } from './ui.js';
 
-Object.assign(window, { renderStart, startGame, humanAction, doRaise, nextHand });
+Object.assign(window, { renderStart, startGame, humanAction, doRaise, nextRound });
 
 renderStart();
