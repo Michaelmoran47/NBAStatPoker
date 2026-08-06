@@ -1,3 +1,4 @@
+// @ts-check
 // Static reference data for the game: the player pool, the stat categories that can be
 // dealt, and the "suit" pairs used for Flush-style combos.
 //
@@ -5,7 +6,42 @@
 // browser client and (later) a Node game server, so the two never disagree about what
 // a "Career Points" card is worth.
 
+/**
+ * One NBA legend's career stat line, as dealt into a player's hole cards.
+ * @typedef {Object} NBAPlayer
+ * @property {number} id
+ * @property {string} name
+ * @property {string} pos
+ * @property {number} games
+ * @property {number} points
+ * @property {number} rebounds
+ * @property {number} assists
+ * @property {number} steals
+ * @property {number} blocks
+ * @property {number} threes
+ * @property {number} ppg
+ * @property {number} rpg
+ * @property {number} apg
+ */
+
+/**
+ * A stat category that can be revealed on the flop/turn/river.
+ * @typedef {Object} Category
+ * @property {string} key    Matches an NBAPlayer numeric field.
+ * @property {string} label
+ * @property {string} icon
+ * @property {(value: number) => string} fmt
+ */
+
+/**
+ * A "suit" — two categories that together form a Flush-style bonus when both are won.
+ * @typedef {Object} ComboPair
+ * @property {string} name
+ * @property {string[]} keys Two Category keys, e.g. ['points','ppg'].
+ */
+
 // Approximate career regular-season stats (mock/rounded for gameplay, not exact box-score accurate).
+/** @type {NBAPlayer[]} */
 export const POOL = [
   {name:"LeBron James", pos:"SF", games:1492, points:41000, rebounds:11400, assists:11000, steals:2200, blocks:1100, threes:2300, ppg:27.1, rpg:7.5, apg:7.3},
   {name:"Michael Jordan", pos:"SG", games:1072, points:32292, rebounds:6672, assists:5633, steals:2514, blocks:893, threes:581, ppg:30.1, rpg:6.2, apg:5.3},
@@ -41,6 +77,7 @@ export const POOL = [
   {name:"Patrick Ewing", pos:"C", games:1183, points:24815, rebounds:11607, assists:1745, steals:913, blocks:2894, threes:10, ppg:21.0, rpg:9.8, apg:1.9}
 ].map((p,i)=>({...p, id:i}));
 
+/** @type {Category[]} */
 export const CATS = [
   {key:'points', label:'Career Points', icon:'🏀', fmt:v=>v.toLocaleString()},
   {key:'rebounds', label:'Career Rebounds', icon:'💪', fmt:v=>v.toLocaleString()},
@@ -56,6 +93,7 @@ export const CATS = [
 
 // "Suits" — career/per-game pairs. Winning BOTH categories in a pair (when both happen
 // to be in play for the hand) triggers a Flush-style bonus, same way suited cards do.
+/** @type {ComboPair[]} */
 export const FAMILY_PAIRS = [
   {name:'Scoring Flush', keys:['points','ppg']},
   {name:'Rebounding Flush', keys:['rebounds','rpg']},

@@ -1,3 +1,4 @@
+// @ts-check
 // Betting rules and the CPU decision policy. No DOM access — `bettingRound` takes a
 // `render` callback so this stays reusable outside a browser (e.g. a server driving
 // the same round logic against network-connected players instead of a redraw).
@@ -6,12 +7,15 @@ import { state, logMsg, activePlayers } from './state.js';
 import { scoreCategories } from './scoring.js';
 import { sleep } from './utils.js';
 
+/** @returns {number} */
 export function currentMaxBet(){
   return Math.max(0, ...state.G.players.filter(p=>!p.folded).map(p=>p.roundBet));
 }
 
+/** @param {import('./state.js').GamePlayer} p */
 export function applyFold(p){ p.folded = true; logMsg(`${p.name} folds.`); }
 
+/** @param {import('./state.js').GamePlayer} p */
 export function applyCall(p){
   const need = currentMaxBet() - p.roundBet;
   const pay = Math.min(need, p.chips);
@@ -20,6 +24,10 @@ export function applyCall(p){
   logMsg(pay===0 ? `${p.name} checks.` : `${p.name} calls $${pay}.`);
 }
 
+/**
+ * @param {import('./state.js').GamePlayer} p
+ * @param {number} raiseTo
+ */
 export function applyRaise(p, raiseTo){
   const need = raiseTo - p.roundBet;
   const pay = Math.min(need, p.chips);
@@ -28,6 +36,10 @@ export function applyRaise(p, raiseTo){
   logMsg(`${p.name} raises to $${p.roundBet}.`);
 }
 
+/**
+ * @param {import('./state.js').GamePlayer} p
+ * @returns {import('./state.js').BettingAction}
+ */
 export function aiDecide(p){
   const active = activePlayers();
   const cats = state.G.revealedCats;
@@ -44,6 +56,7 @@ export function aiDecide(p){
   const bluff = Math.random() < 0.12;
   const potOdds = need / Math.max(1, state.G.pot+need);
 
+  /** @type {'fold'|'call'|'raise'} */
   let action;
   if(need===0){
     action = (strength>0.55 || bluff) && Math.random()<0.35 && p.chips>0 ? 'raise' : 'call'; // "call" here = check
@@ -66,8 +79,13 @@ export function aiDecide(p){
 
 // Runs a full betting round (everyone acts until bets are matched or one player remains).
 // `render(actingId)` is called to show whose turn it is; `render()` after each action.
+/**
+ * @param {(actingId?: number) => void} render
+ * @returns {Promise<void>}
+ */
 export async function bettingRound(render){
   const order = state.G.players.map(p=>p.id);
+  /** @type {Set<number>} */
   let acted = new Set();
   let guard = 0;
 
@@ -83,9 +101,10 @@ export async function bettingRound(render){
     });
     if(needsAction===undefined) break;
 
-    const p = state.G.players.find(x=>x.id===needsAction);
+    const p = /** @type {import('./state.js').GamePlayer} */ (state.G.players.find(x=>x.id===needsAction));
     render(p.id);
 
+    /** @type {import('./state.js').BettingAction} */
     let result;
     if(p.id===0){
       result = await new Promise(res=>{ state.resolveHuman = res; });

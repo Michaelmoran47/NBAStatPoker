@@ -1,3 +1,4 @@
+// @ts-check
 // Orchestrates a full hand: deal -> flop -> turn -> river -> showdown, each followed by
 // a betting round. Like betting.js, this takes a `render` callback rather than touching
 // the DOM directly, so the same hand flow could later be driven by a server loop instead
@@ -8,6 +9,10 @@ import { bettingRound } from './betting.js';
 import { scoreCategories, computeCombos, bonusForCombo } from './scoring.js';
 import { sleep } from './utils.js';
 
+/**
+ * @param {(actingId?: number) => void} render
+ * @returns {Promise<void>}
+ */
 export async function playHand(render){
   state.handInProgress = true;
   dealNewHand();
@@ -24,7 +29,8 @@ export async function playHand(render){
     if(activePlayers().length<=1) break;
     state.G.stage = st.name;
     for(let i=0;i<st.count;i++){
-      state.G.revealedCats.push(state.G.handCats[state.G.revealedCats.length]);
+      const handCats = /** @type {import('./data.js').Category[]} */ (state.G.handCats);
+      state.G.revealedCats.push(handCats[state.G.revealedCats.length]);
     }
     logMsg(`--- ${st.name.toUpperCase()} ---  ` + state.G.revealedCats.slice(-st.count).map(c=>c.label).join(', '));
     state.G.players.forEach(p=>{ p.roundBet=0; });
@@ -37,6 +43,10 @@ export async function playHand(render){
   state.handInProgress = false;
 }
 
+/**
+ * @param {(actingId?: number) => void} render
+ * @returns {Promise<void>}
+ */
 export async function showdown(render){
   const G = state.G;
   G.stage = 'showdown';
@@ -51,16 +61,18 @@ export async function showdown(render){
     return;
   }
 
-  const {breakdown, totals} = scoreCategories(active, G.handCats);
+  const handCats = /** @type {import('./data.js').Category[]} */ (G.handCats);
+  const {breakdown, totals} = scoreCategories(active, handCats);
   const best = Math.max(...Object.values(totals));
   const winners = active.filter(p=>totals[p.id]===best).map(p=>p.id);
-  const combos = computeCombos(active, G.handCats, breakdown);
+  const combos = computeCombos(active, handCats, breakdown);
 
   const share = Math.floor(G.pot/winners.length);
   let bonusTotal = 0;
+  /** @type {string[]} */
   const bonusLog = [];
   winners.forEach(id=>{
-    const player = G.players.find(p=>p.id===id);
+    const player = /** @type {import('./state.js').GamePlayer} */ (G.players.find(p=>p.id===id));
     const {mult, labels} = bonusForCombo(combos[id]);
     const bonus = Math.round(share*mult);
     player.chips += share + bonus;
@@ -68,7 +80,7 @@ export async function showdown(render){
     if(labels.length) bonusLog.push(`${player.name}: ${labels.join(' + ')} → +$${bonus} bonus`);
   });
 
-  logMsg(`Showdown! ${winners.map(id=>G.players.find(p=>p.id===id).name).join(' & ')} win the $${G.pot} pot${bonusTotal? ` (+$${bonusTotal} combo bonus)`:''}.`);
+  logMsg(`Showdown! ${winners.map(id=>/** @type {import('./state.js').GamePlayer} */(G.players.find(p=>p.id===id)).name).join(' & ')} win the $${G.pot} pot${bonusTotal? ` (+$${bonusTotal} combo bonus)`:''}.`);
   bonusLog.forEach(l=>logMsg('🔥 '+l));
 
   G.lastResult = {breakdown, totals, winners, uncontested:false, combos, bonusLog};

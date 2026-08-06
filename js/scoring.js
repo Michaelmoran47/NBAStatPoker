@@ -1,3 +1,4 @@
+// @ts-check
 // Pure hand-scoring logic: no DOM, no game state, no randomness. Given a set of players
 // and revealed categories, these functions always return the same answer.
 //
@@ -7,13 +8,21 @@
 
 import { FAMILY_PAIRS } from './data.js';
 
+/**
+ * @param {import('./state.js').GamePlayer[]} players
+ * @param {import('./data.js').Category[]} cats
+ * @returns {{breakdown: Object<number, Object<string, import('./state.js').CategoryScore>>, totals: Object<number, number>}}
+ */
 export function scoreCategories(players, cats){
   const n = players.length;
+  /** @type {Object<number, Object<string, import('./state.js').CategoryScore>>} */
   const breakdown = {};
+  /** @type {Object<number, number>} */
   const totals = {};
   players.forEach(p=>{ breakdown[p.id]={}; totals[p.id]=0; });
   cats.forEach(cat=>{
-    const vals = players.map(p=>({id:p.id, value:p.hole[0][cat.key]+p.hole[1][cat.key]}));
+    const key = /** @type {keyof import('./data.js').NBAPlayer} */ (cat.key);
+    const vals = players.map(p=>({id:p.id, value:/** @type {number} */(p.hole[0][key])+/** @type {number} */(p.hole[1][key])}));
     vals.sort((a,b)=>b.value-a.value);
     let i=0;
     while(i<vals.length){
@@ -36,8 +45,15 @@ export function scoreCategories(players, cats){
 // any "Flush" pair (both halves of a Scoring/Rebounding/Playmaking pair present
 // in this hand's categories, and won both)? This is the "straights & flushes"
 // layer — named combos worth chasing on top of the raw category totals.
+/**
+ * @param {import('./state.js').GamePlayer[]} active
+ * @param {import('./data.js').Category[]} cats
+ * @param {Object<number, Object<string, import('./state.js').CategoryScore>>} breakdown
+ * @returns {Object<number, import('./state.js').ComboInfo>}
+ */
 export function computeCombos(active, cats, breakdown){
   const n = active.length;
+  /** @type {Object<number, import('./state.js').ComboInfo>} */
   const combos = {};
   active.forEach(p=>{
     const won = cats.filter(c => breakdown[p.id][c.key].points === n).map(c=>c.key);
@@ -49,6 +65,10 @@ export function computeCombos(active, cats, breakdown){
   return combos;
 }
 
+/**
+ * @param {import('./state.js').ComboInfo} combo
+ * @returns {{mult: number, labels: string[]}}
+ */
 export function bonusForCombo(combo){
   let mult = 0;
   const labels = [];
