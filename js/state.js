@@ -29,7 +29,6 @@ import { shuffle } from './utils.js';
 /**
  * @typedef {Object} ComboInfo
  * @property {string[]} won
- * @property {string[]} flushes
  */
 
 /**

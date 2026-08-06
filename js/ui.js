@@ -7,7 +7,6 @@
 import { ANTE, state, makeGame, activePlayers } from './state.js';
 import { currentMaxBet } from './betting.js';
 import { playHand } from './engine.js';
-import { FAMILY_PAIRS } from './data.js';
 
 /**
  * @param {'fold'|'call'|'raise'} action
@@ -42,11 +41,8 @@ export function renderStart(){
         summed for every revealed category; the player who ranks #1 in the most categories (by total rank
         points) wins the pot. Ties split it.
         <br><br>
-        <b>Combos to chase:</b> win 3 of the 5 categories for a <b>Hat Trick</b> (+10% pot bonus), 4 for
-        <b>Dominant</b> (+20%), or all 5 for a <b>Sweep</b> (+35%). If both halves of a Scoring
-        (points + pts/game), Rebounding (rebounds + reb/game), or Playmaking (assists + ast/game) pair
-        land in the same hand and you win both, that's a <b>Flush</b> (+15%) — watch the "Combo Watch"
-        panel during the hand to see which flushes are still live.
+        <b>Combos to chase:</b> win 4 of the 5 categories for a <b>Dominant</b> bonus (+20% pot), or all 5
+        for a <b>Sweep</b> (+35%).
       </div>
     </div>`;
 }
@@ -110,24 +106,6 @@ export function render(actingId){
       <div class="pname">${pl.name}</div>
     </div>`).join('') : '';
 
-  // Combo Watch: which Flush-style pairs are "live" this hand (fair to show — it's
-  // only about your own hole cards + which categories are in the deck this hand,
-  // never opponents' hidden cards).
-  let comboWatchHtml = '';
-  if(G.handCats && G.stage!=='showdown' && G.stage!=='idle'){
-    const live = FAMILY_PAIRS.filter(fp => fp.keys.every(k => handCats.some(c=>c.key===k)));
-    if(live.length){
-      comboWatchHtml = `<div class="chase-meter">🎯 <b>Combo Watch:</b> ${live.map(fp=>{
-        const catsForPair = fp.keys.map(k=>/** @type {import('./data.js').Category} */(handCats.find(c=>c.key===k)));
-        const revealedCount = catsForPair.filter(c=>G.revealedCats.includes(c)).length;
-        const statusTxt = revealedCount===2 ? 'both revealed — check the breakdown at showdown!' : revealedCount===1 ? '1 of 2 revealed, still live' : 'not revealed yet';
-        return `${fp.name} (${catsForPair.map(c=>c.icon).join('')}) — ${statusTxt}`;
-      }).join(' &nbsp;|&nbsp; ')}</div>`;
-    } else {
-      comboWatchHtml = `<div class="chase-meter">No Flush pairs live this hand — chase a Hat Trick or Sweep instead (win 3+ of the 5 categories).</div>`;
-    }
-  }
-
   const maxBet = currentMaxBet();
   const need = human.folded ? 0 : maxBet - human.roundBet;
   const humanTurn = actingId===0 && !human.folded;
@@ -167,12 +145,9 @@ export function render(actingId){
         <tr><th>Total</th>${active.map(p=>`<th class="${winners.includes(p.id)?'winner-cell':''}">${/** @type {Object<number,number>} */(totals)[p.id].toFixed(1)}</th>`).join('')}</tr>
         <tr><td>Combos</td>${active.map(p=>{
           const c = /** @type {Object<number,import('./state.js').ComboInfo>} */(combos)[p.id];
-          const pills = [
-            ...(c.won.length>=5 ? ['<span class="combo-pill">SWEEP</span>'] :
-                c.won.length===4 ? ['<span class="combo-pill">DOMINANT</span>'] :
-                c.won.length===3 ? ['<span class="combo-pill">HAT TRICK</span>'] : []),
-            ...c.flushes.map(f=>`<span class="combo-pill flush">${f.toUpperCase()}</span>`)
-          ];
+          const pills =
+            c.won.length>=5 ? ['<span class="combo-pill">SWEEP</span>'] :
+            c.won.length===4 ? ['<span class="combo-pill">DOMINANT</span>'] : [];
           return `<td>${pills.length? pills.join(' ') : '<small style="opacity:.5;">—</small>'}</td>`;
         }).join('')}</tr>
         </tbody></table>
@@ -188,7 +163,6 @@ export function render(actingId){
       <div class="status-line">Stage: ${G.stage.toUpperCase()} — Hand #${G.handNum}</div>
       <div class="categories">${catHtml}</div>
       <div class="pot-line">💰 Pot: $${G.pot}</div>
-      ${comboWatchHtml}
       <div class="hole-area">${holeHtml}</div>
       <div class="you-line">You — $${human.chips}${human.folded?' (folded)':''}</div>
       ${actionsHtml}

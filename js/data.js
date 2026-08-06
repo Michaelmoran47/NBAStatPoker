@@ -1,6 +1,6 @@
 // @ts-check
-// Static reference data for the game: the player pool, the stat categories that can be
-// dealt, and the "suit" pairs used for Flush-style combos.
+// Static reference data for the game: the player pool and the stat categories that can
+// be dealt.
 //
 // This module has no dependencies and no side effects — safe to import from both the
 // browser client and (later) a Node game server, so the two never disagree about what
@@ -31,13 +31,6 @@
  * @property {string} label
  * @property {string} icon
  * @property {(value: number) => string} fmt
- */
-
-/**
- * A "suit" — two categories that together form a Flush-style bonus when both are won.
- * @typedef {Object} ComboPair
- * @property {string} name
- * @property {string[]} keys Two Category keys, e.g. ['points','ppg'].
  */
 
 // Approximate career regular-season stats (mock/rounded for gameplay, not exact box-score accurate).
@@ -89,13 +82,4 @@ export const CATS = [
   {key:'steals', label:'Career Steals', icon:'🕵️', fmt:v=>v.toLocaleString()},
   {key:'blocks', label:'Career Blocks', icon:'🚫', fmt:v=>v.toLocaleString()},
   {key:'threes', label:'Career 3PM', icon:'💦', fmt:v=>v.toLocaleString()}
-];
-
-// "Suits" — career/per-game pairs. Winning BOTH categories in a pair (when both happen
-// to be in play for the hand) triggers a Flush-style bonus, same way suited cards do.
-/** @type {ComboPair[]} */
-export const FAMILY_PAIRS = [
-  {name:'Scoring Flush', keys:['points','ppg']},
-  {name:'Rebounding Flush', keys:['rebounds','rpg']},
-  {name:'Playmaking Flush', keys:['assists','apg']}
 ];
