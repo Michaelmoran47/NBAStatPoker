@@ -10,7 +10,7 @@ import { scoreCategories } from './scoring.js';
 import { sleep } from './utils.js';
 
 /**
- * @param {(actingId?: number) => void} render
+ * @param {import('./state.js').RenderFn} render
  * @returns {Promise<void>}
  */
 export async function playGame(render){
@@ -22,7 +22,7 @@ export async function playGame(render){
 }
 
 /**
- * @param {(actingId?: number) => void} render
+ * @param {import('./state.js').RenderFn} render
  * @returns {Promise<void>}
  */
 export async function playRound(render){
@@ -36,7 +36,7 @@ export async function playRound(render){
 
 // Called when the human clicks "Next Round".
 /**
- * @param {(actingId?: number) => void} render
+ * @param {import('./state.js').RenderFn} render
  * @returns {Promise<void>}
  */
 export async function nextRound(render){
@@ -45,7 +45,7 @@ export async function nextRound(render){
 }
 
 /**
- * @param {(actingId?: number) => void} render
+ * @param {import('./state.js').RenderFn} render
  * @returns {Promise<void>}
  */
 export async function resolveRound(render){

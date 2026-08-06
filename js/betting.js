@@ -80,7 +80,7 @@ export function aiDecide(p){
 // Runs a full betting round (everyone acts until bets are matched or one player remains).
 // `render(actingId)` is called to show whose turn it is; `render()` after each action.
 /**
- * @param {(actingId?: number) => void} render
+ * @param {import('./state.js').RenderFn} render
  * @returns {Promise<void>}
  */
 export async function bettingRound(render){
@@ -118,7 +118,10 @@ export async function bettingRound(render){
     else { applyCall(p); }
 
     acted.add(p.id);
-    render();
+    // Passing what just happened lets the UI play a one-shot animation (chip flight,
+    // fold fade, pot bump) for this render only — betting.js still never touches the
+    // DOM itself, it just tells the render callback what occurred.
+    render(undefined, {playerId: p.id, action: result.action});
     await sleep(150);
   }
 }

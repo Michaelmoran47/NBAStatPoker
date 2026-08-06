@@ -65,6 +65,18 @@ import { shuffle } from './utils.js';
  * @typedef {{action:'fold'}|{action:'call'}|{action:'raise', amount:number}} BettingAction
  */
 
+/**
+ * What just happened, passed to `render` on the single call right after an action is
+ * applied — lets the UI play a one-shot animation (chip flight, fold fade, pot bump)
+ * without betting.js/engine.js touching the DOM themselves.
+ * @typedef {{playerId:number, action:'fold'|'call'|'raise'}} LastAction
+ */
+
+/**
+ * The shape every render callback passed into engine.js/betting.js must have.
+ * @typedef {(actingId?: number, lastAction?: LastAction) => void} RenderFn
+ */
+
 export const ANTE = 20;
 export const START_CHIPS = 1000;
 export const ROUNDS = 3;
