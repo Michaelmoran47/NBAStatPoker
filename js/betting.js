@@ -15,13 +15,17 @@ export function currentMaxBet(){
 /** @param {import('./state.js').GamePlayer} p */
 export function applyFold(p){ p.folded = true; logMsg(`${p.name} folds.`); }
 
-/** @param {import('./state.js').GamePlayer} p */
+/**
+ * @param {import('./state.js').GamePlayer} p
+ * @returns {number} What was actually paid — 0 means this was a check, not a call.
+ */
 export function applyCall(p){
   const need = currentMaxBet() - p.roundBet;
   const pay = Math.min(need, p.chips);
   p.chips -= pay; p.roundBet += pay; state.G.pot += pay;
   if(p.chips===0) p.allIn = true;
   logMsg(pay===0 ? `${p.name} checks.` : `${p.name} calls $${pay}.`);
+  return pay;
 }
 
 /**
@@ -113,15 +117,20 @@ export async function bettingRound(render){
       result = aiDecide(p);
     }
 
+    /** @type {'fold'|'call'|'raise'|'check'} */
+    let actionLabel = result.action;
     if(result.action==='fold'){ applyFold(p); }
     else if(result.action==='raise'){ applyRaise(p, result.amount); acted = new Set(); }
-    else { applyCall(p); }
+    else {
+      const pay = applyCall(p);
+      if(pay===0) actionLabel = 'check'; // a zero-cost call is a check — different animation, no chip flies
+    }
 
     acted.add(p.id);
     // Passing what just happened lets the UI play a one-shot animation (chip flight,
-    // fold fade, pot bump) for this render only — betting.js still never touches the
-    // DOM itself, it just tells the render callback what occurred.
-    render(undefined, {playerId: p.id, action: result.action});
+    // fold fade, pot bump, check tap) for this render only — betting.js still never
+    // touches the DOM itself, it just tells the render callback what occurred.
+    render(undefined, {playerId: p.id, action: actionLabel});
     await sleep(150);
   }
 }

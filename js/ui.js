@@ -84,10 +84,12 @@ const PERSON_ICON = `<svg class="id-icon" viewBox="0 0 200 260">
  * @param {number|undefined} actingId
  * @param {boolean} revealHoles
  * @param {'seat-left'|'seat-right'} side
+ * @param {boolean} justChecked
  */
-function renderSeat(p, actingId, revealHoles, side){
+function renderSeat(p, actingId, revealHoles, side, justChecked){
   return `
-    <div class="seat ${side} ${p.folded?'folded':''} ${actingId===p.id?'acting':''}" data-seat="${p.id}">
+    <div class="seat ${side} ${p.folded?'folded':''} ${actingId===p.id?'acting':''} ${justChecked?'just-checked':''}" data-seat="${p.id}">
+      ${justChecked ? `<div class="check-tap">✊</div>` : ''}
       <div class="seat-cards">
         ${[0,1].map(i=>{
           return revealHoles
@@ -132,9 +134,9 @@ function flyChip(fromSelector, delay){
 
 /**
  * @param {number} [actingId] Whose turn it is right now, if anyone.
- * @param {{playerId:number, action:'fold'|'call'|'raise'}} [lastAction] What just happened,
+ * @param {import('./state.js').LastAction} [lastAction] What just happened,
  *   so this render can play the matching one-shot animation (chip flight, fold fade,
- *   pot bump) — set only on the render call immediately after an action is applied.
+ *   pot bump, check tap) — set only on the render call immediately after an action is applied.
  */
 export function render(actingId, lastAction){
   const G = state.G;
@@ -146,9 +148,10 @@ export function render(actingId, lastAction){
   // Hole cards flip face-up once a round has resolved — the numbers matter every round,
   // but who's actually holding them stays a mystery until there's a card on the line.
   const revealHoles = G.stage==='round-result' || G.stage==='game-over';
+  const checkedId = lastAction && lastAction.action==='check' ? lastAction.playerId : null;
 
-  const seatLeft = opponents[0] ? renderSeat(opponents[0], actingId, revealHoles, 'seat-left') : `<div class="seat-left"></div>`;
-  const seatRight = opponents[1] ? renderSeat(opponents[1], actingId, revealHoles, 'seat-right') : `<div class="seat-right"></div>`;
+  const seatLeft = opponents[0] ? renderSeat(opponents[0], actingId, revealHoles, 'seat-left', checkedId===opponents[0].id) : `<div class="seat-left"></div>`;
+  const seatRight = opponents[1] ? renderSeat(opponents[1], actingId, revealHoles, 'seat-right', checkedId===opponents[1].id) : `<div class="seat-right"></div>`;
 
   const currentCat = G.revealedCats[0];
   const statCardHtml = currentCat
@@ -251,7 +254,8 @@ export function render(actingId, lastAction){
       ${seatRight}
     </div>
 
-    <div class="you-seat ${human.folded?'folded':''}" data-seat="0">
+    <div class="you-seat ${human.folded?'folded':''} ${checkedId===0?'just-checked':''}" data-seat="0">
+      ${checkedId===0 ? `<div class="check-tap">✊</div>` : ''}
       <div class="hole-cards ${lastAction && lastAction.playerId===0 && lastAction.action==='fold' ? 'just-folded' : ''}">${holeHtml}</div>
       <div class="you-header">
         <div class="you-name">You${human.folded?' (folded)':''}</div>

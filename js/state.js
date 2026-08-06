@@ -67,9 +67,10 @@ import { shuffle } from './utils.js';
 
 /**
  * What just happened, passed to `render` on the single call right after an action is
- * applied — lets the UI play a one-shot animation (chip flight, fold fade, pot bump)
- * without betting.js/engine.js touching the DOM themselves.
- * @typedef {{playerId:number, action:'fold'|'call'|'raise'}} LastAction
+ * applied — lets the UI play a one-shot animation (chip flight, fold fade, pot bump,
+ * check tap) without betting.js/engine.js touching the DOM themselves. 'check' is a
+ * zero-cost 'call' — betting.js resolves the distinction before render ever sees it.
+ * @typedef {{playerId:number, action:'fold'|'call'|'raise'|'check'}} LastAction
  */
 
 /**

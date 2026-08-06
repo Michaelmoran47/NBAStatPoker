@@ -125,7 +125,7 @@ h1{margin:6px 0 2px; font-size:1.5em; letter-spacing:1px;}
 }
 
 /* ---------- Opponent seats: two face-down cards, chip count, community-card tally ---------- */
-.seat{ display:flex; flex-direction:column; align-items:center; gap:6px; }
+.seat{ position:relative; display:flex; flex-direction:column; align-items:center; gap:6px; }
 .seat-cards{ display:flex; gap:8px; }
 .seat-name{ font-size:.9em; font-weight:700; color:var(--text); }
 .seat-chips{
@@ -135,6 +135,29 @@ h1{margin:6px 0 2px; font-size:1.5em; letter-spacing:1px;}
 }
 .seat.folded{ opacity:.45; }
 .seat.acting .mini-card{ box-shadow:0 0 0 3px rgba(232,193,92,.45); }
+
+/* Checking: nothing changes hands, so no chip flies — instead the seat gives a
+   quick knock (the physical "check" gesture at a real table) and a small tap glyph
+   pops up and fades. */
+.seat.just-checked, .you-seat.just-checked{ animation:checkKnock .5s ease; }
+@keyframes checkKnock{
+  0%, 100%{ transform:scale(1); }
+  25%{ transform:scale(.94); }
+  50%{ transform:scale(1); }
+  70%{ transform:scale(.97); }
+  85%{ transform:scale(1); }
+}
+.check-tap{
+  position:absolute; top:-4px; left:50%;
+  font-size:1.15em; pointer-events:none;
+  animation:tapPop .6s ease forwards;
+}
+@keyframes tapPop{
+  0%{ opacity:0; transform:translate(-50%,4px) scale(.6); }
+  30%{ opacity:1; transform:translate(-50%,-4px) scale(1.15); }
+  100%{ opacity:0; transform:translate(-50%,-16px) scale(1); }
+}
+
 .cards-tally{ font-size:.78em; letter-spacing:1px; min-height:1em; }
 .cards-tally .fly{ display:inline-block; animation:fly 700ms ease-out; }
 @keyframes fly{
