@@ -7,7 +7,6 @@
 import { ANTE, state, makeGame, activePlayers } from './state.js';
 import { currentMaxBet } from './betting.js';
 import { playHand } from './engine.js';
-import { percentile } from './utils.js';
 import { FAMILY_PAIRS } from './data.js';
 
 /**
@@ -94,7 +93,7 @@ export function render(actingId){
           const revealed = G.stage==='showdown' && !p.folded;
           return revealed
             ? `<div class="mini-card revealed">${p.hole[i].name.split(' ').slice(-1)[0]}</div>`
-            : `<div class="mini-card">🂠</div>`;
+            : `<div class="mini-card back"><span class="mini-card-back-art">🏀</span></div>`;
         }).join('') : ''}
       </div>
     </div>`).join('');
@@ -109,12 +108,6 @@ export function render(actingId){
   const holeHtml = human.hole.length ? human.hole.map(pl=>`
     <div class="player-card">
       <div class="pname">${pl.name}</div>
-      <div class="ppos">${pl.pos}</div>
-      ${handCats.map(c=>{
-        const pct = percentile(c.key, /** @type {number} */(pl[/** @type {keyof import('./data.js').NBAPlayer} */(c.key)]));
-        const pctColor = pct>=75 ? '#1e8449' : pct>=45 ? '#8a6d00' : '#a93226';
-        return `<div class="stat"><span>${c.icon} ${c.label}</span><span><b>${c.fmt(/** @type {number} */(pl[/** @type {keyof import('./data.js').NBAPlayer} */(c.key)]))}</b> <small style="color:${pctColor};font-weight:700;">${pct}%ile</small></span></div>`;
-      }).join('')}
     </div>`).join('') : '';
 
   // Combo Watch: which Flush-style pairs are "live" this hand (fair to show — it's
