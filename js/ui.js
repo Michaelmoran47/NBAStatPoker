@@ -177,8 +177,16 @@ export function render(actingId, lastAction){
 
   const maxBet = currentMaxBet();
   const need = human.folded ? 0 : maxBet - human.roundBet;
+  const callAmount = Math.min(need, human.chips); // what Call would actually cost, clamped to an all-in
   const humanTurn = actingId===0 && !human.folded && G.stage==='betting';
-  const raiseDefault = Math.min(maxBet+40, human.chips+human.roundBet);
+
+  const minRaiseTo = maxBet+20;
+  const maxRaiseTo = human.chips+human.roundBet;
+  // If a player's stack can't cover even the minimum legal raise, don't offer one —
+  // a slider whose min exceeds its max just freezes, undraggable, which is exactly
+  // the "raise slider doesn't work" bug this replaces.
+  const canRaise = maxRaiseTo >= minRaiseTo;
+  const raiseDefault = Math.min(minRaiseTo+20, maxRaiseTo);
 
   let controlsHtml = '';
   if(G.stage==='betting'){
@@ -186,10 +194,10 @@ export function render(actingId, lastAction){
       <div class="controls">
         <div class="actions">
           <button class="btn btn-fold" onclick="humanAction('fold')">Fold</button>
-          <button class="btn btn-call" onclick="humanAction('call')">${need>0? 'Call $'+need : 'Check'}</button>
-          <button class="btn btn-raise" id="raiseBtn" onclick="doRaise()">Raise ${raiseDefault}</button>
+          <button class="btn btn-call" onclick="humanAction('call')">${callAmount>0? 'Call $'+callAmount : 'Check'}</button>
+          ${canRaise ? `<button class="btn btn-raise" id="raiseBtn" onclick="doRaise()">Raise ${raiseDefault}</button>` : ''}
         </div>
-        <input type="range" class="raise-slider" id="raiseSlider" min="${maxBet+20}" max="${human.chips+human.roundBet}" step="10" value="${raiseDefault}" oninput="updateRaiseLabel(this.value)">
+        ${canRaise ? `<input type="range" class="raise-slider" id="raiseSlider" min="${minRaiseTo}" max="${maxRaiseTo}" step="10" value="${raiseDefault}" oninput="updateRaiseLabel(this.value)">` : ''}
       </div>` : `<div class="controls"><div class="status-line">Waiting on other players…</div></div>`;
   }
 
