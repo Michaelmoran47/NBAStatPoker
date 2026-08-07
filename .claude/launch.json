@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "nba-stat-poker",
-      "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "5500"],
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["server/server.js"],
       "port": 5500
     }
   ]

@@ -1,0 +1,20 @@
+{
+  "name": "nba-stat-poker-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Accounts + static-file server for NBA Stat Poker (Phase 1 of multiplayer).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "bcrypt": "^6.0.0",
+    "express": "^4.19.2",
+    "express-session": "^1.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4"
+  }
+}
