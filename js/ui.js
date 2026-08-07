@@ -99,7 +99,7 @@ function renderSeat(p, actingId, revealHoles, side, justChecked){
       </div>
       <div class="seat-name">${p.name}</div>
       <div class="seat-chips chip-amount">$${p.chips}${p.allIn?' (all-in)':''}</div>
-      <div class="cards-tally">${'🃏'.repeat(p.cardsWon)}</div>
+      <div class="cards-tally">${p.wonCategories.map(c=>c.icon).join('')}</div>
     </div>`;
 }
 
@@ -229,7 +229,7 @@ export function render(actingId, lastAction){
     const winnerNames = gr.winners.map(id=>/** @type {import('./state.js').GamePlayer} */(G.players.find(p=>p.id===id)).name).join(' & ');
     gameOverHtml = `<div id="game-over">
       <h2>🏆 Game Over</h2>
-      <p>${G.players.map(p=>`${p.name}: ${p.cardsWon} 🃏`).join(' &nbsp;|&nbsp; ')}</p>
+      <p>${G.players.map(p=>`${p.name}: ${p.wonCategories.map(c=>c.icon).join('') || '—'}`).join(' &nbsp;|&nbsp; ')}</p>
       <p><b>${winnerNames} win${gr.winners.length===1?'s':''} the match!</b></p>
       <button class="btn-next" onclick="renderStart()">New Game</button>
     </div>`;
@@ -259,7 +259,7 @@ export function render(actingId, lastAction){
       <div class="hole-cards ${lastAction && lastAction.playerId===0 && lastAction.action==='fold' ? 'just-folded' : ''}">${holeHtml}</div>
       <div class="you-header">
         <div class="you-name">You${human.folded?' (folded)':''}</div>
-        <div class="cards-tally">${'🃏'.repeat(human.cardsWon)}</div>
+        <div class="cards-tally">${human.wonCategories.map(c=>c.icon).join('')}</div>
         <div class="you-chips chip-amount">$${human.chips}</div>
       </div>
     </div>

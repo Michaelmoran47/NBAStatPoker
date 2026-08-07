@@ -23,7 +23,10 @@ import { shuffle } from './utils.js';
  * @property {boolean} folded Resets every round.
  * @property {number} roundBet
  * @property {boolean} allIn
- * @property {number} cardsWon Community cards won so far this game.
+ * @property {import('./data.js').Category[]} wonCategories Community cards won so far
+ *   this game, in the order they were won — the category's own icon is what gets shown
+ *   next to a player's name, not a generic card glyph, so this has to be the categories
+ *   themselves rather than just a count.
  */
 
 /**
@@ -108,7 +111,7 @@ export function makeGame(numOpponents){
   return {
     players: names.map((n,i)=>({
       id:i, name:n, isAI:i!==0, chips:START_CHIPS, hole:[], folded:false,
-      roundBet:0, allIn:false, cardsWon:0
+      roundBet:0, allIn:false, wonCategories:[]
     })),
     pot:0,
     gameNum:0,
@@ -145,7 +148,7 @@ export function startNewGame(){
   // remove broke players between games (the human seat always stays)
   G.players = G.players.filter(p=> p.id===0 || p.chips>0);
 
-  G.players.forEach(p=>{ p.folded=false; p.roundBet=0; p.allIn=false; p.cardsWon=0; p.hole=[]; });
+  G.players.forEach(p=>{ p.folded=false; p.roundBet=0; p.allIn=false; p.wonCategories=[]; p.hole=[]; });
 
   const deck = shuffle(POOL);
   let idx=0;

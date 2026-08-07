@@ -56,7 +56,7 @@ export async function resolveRound(render){
   if(active.length===1){
     const winner = active[0];
     winner.chips += G.pot;
-    winner.cardsWon += 1;
+    winner.wonCategories.push(cat);
     logMsg(`${winner.name} wins the ${cat.label} card uncontested (+1 🃏).`);
     G.roundResult = {category:cat, winners:[winner.id], uncontested:true, values:null};
   } else {
@@ -72,7 +72,7 @@ export async function resolveRound(render){
     winners.forEach(id=>{
       const player = /** @type {import('./state.js').GamePlayer} */ (G.players.find(p=>p.id===id));
       player.chips += share;
-      player.cardsWon += 1;
+      player.wonCategories.push(cat);
     });
 
     logMsg(`${winners.map(id=>/** @type {import('./state.js').GamePlayer} */(G.players.find(p=>p.id===id)).name).join(' & ')} won the ${cat.label} card (+1 🃏 each)!`);
@@ -80,8 +80,8 @@ export async function resolveRound(render){
   }
 
   if(G.round>=ROUNDS){
-    const best = Math.max(...G.players.map(p=>p.cardsWon));
-    const gameWinners = G.players.filter(p=>p.cardsWon===best).map(p=>p.id);
+    const best = Math.max(...G.players.map(p=>p.wonCategories.length));
+    const gameWinners = G.players.filter(p=>p.wonCategories.length===best).map(p=>p.id);
     G.gameResult = {winners: gameWinners};
     G.stage = 'game-over';
     logMsg(`Game over! ${gameWinners.map(id=>/** @type {import('./state.js').GamePlayer} */(G.players.find(p=>p.id===id)).name).join(' & ')} win the match with ${best} 🃏!`);
