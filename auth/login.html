@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <title>NBA Stat Poker — Sign In</title>
 <link rel="stylesheet" href="../css/style.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   .auth-wrap{
     width:100%; min-height:100vh; display:flex; align-items:center; justify-content:center;
@@ -40,6 +41,12 @@
   }
   .auth-hint{ color:var(--ink); opacity:.6; font-size:.75em; text-align:center; }
   .auth-status{ color:var(--ink); text-align:center; }
+  .auth-divider{
+    display:flex; align-items:center; gap:10px; color:var(--ink); opacity:.5;
+    font-size:.78em; text-transform:uppercase; letter-spacing:.04em;
+  }
+  .auth-divider::before, .auth-divider::after{ content:''; flex:1; height:1px; background:rgba(0,0,0,.2); }
+  #googleSignInDiv{ display:flex; justify-content:center; }
 </style>
 </head>
 <body>

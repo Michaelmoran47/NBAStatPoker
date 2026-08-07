@@ -15,11 +15,14 @@ fs.mkdirSync(dataDir, { recursive: true });
 export const db = new Database(path.join(dataDir, 'app.db'));
 db.pragma('journal_mode = WAL');
 
+// password_hash is nullable: a Google-only account never sets one.
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
+    password_hash TEXT,
+    google_id TEXT UNIQUE,
+    email TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);

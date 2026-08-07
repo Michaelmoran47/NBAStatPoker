@@ -2,6 +2,7 @@
 // Express app: serves the existing static site (unchanged) plus the new /api auth
 // routes, all from one process — one `npm start` runs the whole thing locally.
 
+import 'dotenv/config'; // loads server/.env into process.env, if that file exists
 import express from 'express';
 import session from 'express-session';
 import path from 'node:path';
@@ -39,6 +40,14 @@ app.use(session({
 }));
 
 app.use('/api', authRouter);
+
+// Public, non-secret config the client needs — a Google OAuth Client ID is meant to
+// be visible in client-side code (unlike a client secret, which this app never uses
+// at all: verifying an ID token only needs the client ID). Lets the login page know
+// whether to show the Google button without hardcoding the id into checked-in files.
+app.get('/api/config', (req, res) => {
+  res.json({ googleClientId: process.env.GOOGLE_CLIENT_ID || null });
+});
 
 // Everything else (index.html, css/, js/, auth/login.html, ...) is the existing
 // static site, served as-is — the game itself is untouched by this phase.

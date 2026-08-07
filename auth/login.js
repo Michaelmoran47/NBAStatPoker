@@ -11,11 +11,20 @@ let mode = 'login';
 let error = '';
 /** @type {{username:string}|null} */
 let me = null;
+/** @type {string|null} Set once /api/config responds; null means Google sign-in is off. */
+let googleClientId = null;
 
 async function checkSession(){
   const res = await fetch('/api/me');
   me = res.ok ? await res.json() : null;
   render();
+}
+
+async function loadConfig(){
+  const res = await fetch('/api/config');
+  const config = await res.json();
+  googleClientId = config.googleClientId;
+  if(!me) render(); // only re-render the logged-out screen; the "signed in" screen has no button to add
 }
 
 function render(){
@@ -55,6 +64,10 @@ function render(){
       <div class="auth-error">${escapeHtml(error)}</div>
       <button type="submit" class="btn-next">${mode==='login'?'Log In':'Create Account'}</button>
       ${mode==='signup' ? '<div class="auth-hint">Passwords need at least 8 characters.</div>' : ''}
+      ${googleClientId ? `
+        <div class="auth-divider">or</div>
+        <div id="googleSignInDiv"></div>
+      ` : ''}
     </form>`;
 
   app.querySelectorAll('.auth-tab').forEach(tab=>{
@@ -67,6 +80,8 @@ function render(){
 
   const form = /** @type {HTMLFormElement} */ (document.getElementById('authForm'));
   form.addEventListener('submit', handleSubmit);
+
+  if(googleClientId) renderGoogleButton();
 }
 
 /** @param {SubmitEvent} e */
@@ -94,6 +109,53 @@ async function handleSubmit(e){
   render();
 }
 
+// The Google script tag loads async, so it may not be ready the instant we want to
+// use it — wait for window.google to actually show up rather than assuming it has.
+function waitForGoogleScript(){
+  return new Promise(resolve=>{
+    if(/** @type {any} */ (window).google?.accounts?.id) return resolve(undefined);
+    const check = setInterval(()=>{
+      if(/** @type {any} */ (window).google?.accounts?.id){
+        clearInterval(check);
+        resolve(undefined);
+      }
+    }, 100);
+  });
+}
+
+async function renderGoogleButton(){
+  await waitForGoogleScript();
+  const google = /** @type {any} */ (window).google;
+  const target = document.getElementById('googleSignInDiv');
+  if(!target) return; // the form may have re-rendered (mode switch) while we were waiting
+
+  google.accounts.id.initialize({
+    client_id: googleClientId,
+    callback: handleGoogleCredential
+  });
+  google.accounts.id.renderButton(target, { theme: 'outline', size: 'large', width: 260 });
+}
+
+/** @param {{credential: string}} response */
+async function handleGoogleCredential(response){
+  const res = await fetch('/api/auth/google', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({credential: response.credential})
+  });
+  const body = await res.json();
+
+  if(!res.ok){
+    error = body.error || 'Google sign-in failed.';
+    render();
+    return;
+  }
+
+  error = '';
+  me = body;
+  render();
+}
+
 /** @param {string} s */
 function escapeHtml(s){
   const div = document.createElement('div');
@@ -102,3 +164,4 @@ function escapeHtml(s){
 }
 
 checkSession();
+loadConfig();
