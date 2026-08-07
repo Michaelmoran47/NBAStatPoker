@@ -1,63 +1,70 @@
 // @ts-check
 // Orchestrates a game: deal hole cards once, then run ROUNDS rounds, each being
 // reveal-one-card -> bet -> resolve that round's winner(s). Like betting.js, this takes
-// a `render` callback rather than touching the DOM directly, so the same flow could
-// later be driven by a server loop instead of a browser event loop.
+// the GameState, a `render` callback, and a `requestAction` callback as explicit
+// arguments rather than reaching into any shared state — a local single-player client
+// and a multiplayer server both drive the exact same functions, just with different
+// GameState instances and different requestAction implementations.
 
-import { state, logMsg, activePlayers, startNewGame, startRound, ROUNDS } from './state.js';
+import { logMsg, activePlayers, startNewGame, startRound, ROUNDS } from './state.js';
 import { bettingRound } from './betting.js';
 import { scoreCategories } from './scoring.js';
 import { sleep } from './utils.js';
 
 /**
+ * @param {import('./state.js').GameState} G
  * @param {import('./state.js').RenderFn} render
+ * @param {import('./state.js').RequestActionFn} requestAction
  * @returns {Promise<void>}
  */
-export async function playGame(render){
-  state.handInProgress = true;
-  startNewGame();
+export async function playGame(G, render, requestAction){
+  startNewGame(G);
   render();
   await sleep(400);
-  await playRound(render);
+  await playRound(G, render, requestAction);
 }
 
 /**
+ * @param {import('./state.js').GameState} G
  * @param {import('./state.js').RenderFn} render
+ * @param {import('./state.js').RequestActionFn} requestAction
  * @returns {Promise<void>}
  */
-export async function playRound(render){
-  startRound();
+export async function playRound(G, render, requestAction){
+  startRound(G);
   render();
   await sleep(300);
-  await bettingRound(render);
-  await resolveRound(render);
-  state.handInProgress = state.G.stage !== 'game-over';
+  await bettingRound(G, render, requestAction);
+  await resolveRound(G, render);
 }
 
-// Called when the human clicks "Next Round".
+// Called when the human clicks "Next Round" (or, on the server, when every seat has
+// acknowledged the previous round's result).
 /**
+ * @param {import('./state.js').GameState} G
+ * @param {import('./state.js').RenderFn} render
+ * @param {import('./state.js').RequestActionFn} requestAction
+ * @returns {Promise<void>}
+ */
+export async function nextRound(G, render, requestAction){
+  G.round += 1;
+  await playRound(G, render, requestAction);
+}
+
+/**
+ * @param {import('./state.js').GameState} G
  * @param {import('./state.js').RenderFn} render
  * @returns {Promise<void>}
  */
-export async function nextRound(render){
-  state.G.round += 1;
-  await playRound(render);
-}
-
-/**
- * @param {import('./state.js').RenderFn} render
- * @returns {Promise<void>}
- */
-export async function resolveRound(render){
-  const G = state.G;
+export async function resolveRound(G, render){
   const cat = G.roundCats[G.round-1];
-  const active = activePlayers();
+  const active = activePlayers(G);
 
   if(active.length===1){
     const winner = active[0];
     winner.chips += G.pot;
     winner.wonCategories.push(cat);
-    logMsg(`${winner.name} wins the ${cat.label} card uncontested (+1 🃏).`);
+    logMsg(G, `${winner.name} wins the ${cat.label} card uncontested (+1 🃏).`);
     G.roundResult = {category:cat, winners:[winner.id], uncontested:true, values:null};
   } else {
     const {breakdown, totals} = scoreCategories(active, [cat]);
@@ -75,7 +82,7 @@ export async function resolveRound(render){
       player.wonCategories.push(cat);
     });
 
-    logMsg(`${winners.map(id=>/** @type {import('./state.js').GamePlayer} */(G.players.find(p=>p.id===id)).name).join(' & ')} won the ${cat.label} card (+1 🃏 each)!`);
+    logMsg(G, `${winners.map(id=>/** @type {import('./state.js').GamePlayer} */(G.players.find(p=>p.id===id)).name).join(' & ')} won the ${cat.label} card (+1 🃏 each)!`);
     G.roundResult = {category:cat, winners, uncontested:false, values};
   }
 
@@ -84,7 +91,7 @@ export async function resolveRound(render){
     const gameWinners = G.players.filter(p=>p.wonCategories.length===best).map(p=>p.id);
     G.gameResult = {winners: gameWinners};
     G.stage = 'game-over';
-    logMsg(`Game over! ${gameWinners.map(id=>/** @type {import('./state.js').GamePlayer} */(G.players.find(p=>p.id===id)).name).join(' & ')} win the match with ${best} 🃏!`);
+    logMsg(G, `Game over! ${gameWinners.map(id=>/** @type {import('./state.js').GamePlayer} */(G.players.find(p=>p.id===id)).name).join(' & ')} win the match with ${best} 🃏!`);
   } else {
     G.stage = 'round-result';
   }

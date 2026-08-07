@@ -8,8 +8,9 @@
     "checkJs": true,
     "allowJs": true,
     "noEmit": true,
-    "strict": false
+    "strict": false,
+    "skipLibCheck": true
   },
-  "include": ["**/*.js"],
+  "include": ["**/*.js", "**/*.d.ts"],
   "exclude": ["node_modules", "data"]
 }

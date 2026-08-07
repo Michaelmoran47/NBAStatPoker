@@ -26,3 +26,16 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
+
+// One row per player per completed match. 'loss' via the reconnect-grace-period
+// forfeit path is recorded the moment the timer expires, independent of how the rest
+// of the match eventually turns out — see server/matches.js.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS match_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    room_id TEXT NOT NULL,
+    result TEXT NOT NULL CHECK (result IN ('win','loss')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);

@@ -4,9 +4,16 @@
 // nothing here leaks the other direction. That keeps the door open to swapping this
 // file out for a different client (or a thin multiplayer client) without touching engine.js.
 
-import { ANTE, ROUNDS, state, makeGame, activePlayers } from './state.js';
+import { ANTE, ROUNDS, makeGame, activePlayers } from './state.js';
 import { currentMaxBet } from './betting.js';
 import { playGame, nextRound as engineNextRound } from './engine.js';
+
+// This client's own local game session — state.js itself holds no mutable state any
+// more (see its header comment), so the one-and-only GameState a solo game needs to
+// remember lives here instead, alongside the pending-action resolver requestAction()
+// uses in place of a server socket.
+/** @type {{G: import('./state.js').GameState|null, resolveHuman: ((result: import('./state.js').BettingAction) => void)|null}} */
+const state = { G: null, resolveHuman: null };
 
 /**
  * @param {'fold'|'call'|'raise'} action
@@ -17,6 +24,14 @@ export function humanAction(action, amount){
   const r = state.resolveHuman;
   state.resolveHuman = null;
   r(/** @type {import('./state.js').BettingAction} */ ({action, amount}));
+}
+
+// The client's requestAction: there's only ever one non-AI seat (seat 0, "You"), and
+// "waiting for the human" just means holding onto this Promise's resolver until a
+// button click calls humanAction() above.
+/** @type {import('./state.js').RequestActionFn} */
+function requestAction(seatId){
+  return new Promise(res => { state.resolveHuman = res; });
 }
 
 export function renderStart(){
@@ -51,11 +66,11 @@ export function startGame(){
   const numOpp = /** @type {HTMLSelectElement} */ (document.getElementById('numOpp'));
   const n = parseInt(numOpp.value,10);
   state.G = makeGame(n);
-  playGame(render);
+  playGame(state.G, render, requestAction);
 }
 
 export function nextRound(){
-  engineNextRound(render);
+  if(state.G) engineNextRound(state.G, render, requestAction);
 }
 
 export function doRaise(){
@@ -178,7 +193,7 @@ export function render(actingId, lastAction){
       <div class="pname">${pl.name}</div>
     </div>`).join('') : '';
 
-  const maxBet = currentMaxBet();
+  const maxBet = currentMaxBet(G);
   const need = human.folded ? 0 : maxBet - human.roundBet;
   const callAmount = Math.min(need, human.chips); // what Call would actually cost, clamped to an all-in
   const humanTurn = actingId===0 && !human.folded && G.stage==='betting';
@@ -208,7 +223,7 @@ export function render(actingId, lastAction){
   if((G.stage==='round-result' || G.stage==='game-over') && G.roundResult){
     const rr = G.roundResult;
     const winnerNames = rr.winners.map(id=>/** @type {import('./state.js').GamePlayer} */(G.players.find(p=>p.id===id)).name).join(' & ');
-    const active = activePlayers();
+    const active = activePlayers(G);
     roundResultHtml = `<div id="round-result">
       <h3>${rr.category.icon} ${rr.category.label} — Round ${G.round}/${ROUNDS}</h3>
       ${rr.uncontested ? `<p>${winnerNames} won the card uncontested.</p>` : `

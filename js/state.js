@@ -1,7 +1,10 @@
 // @ts-check
-// Game state: shape, setup, and the mutations a game goes through. `state` is the single
-// mutable object the rest of the app reads and writes — swapping it for "the state the
-// server just sent us" is the seam a future online-lobby client would plug into.
+// Game state: shape, setup, and the mutations a game goes through. Every function here
+// takes the GameState it operates on explicitly — nothing in this file (or betting.js /
+// engine.js) reaches into a module-level singleton any more. That's what lets the exact
+// same functions run a local single-player game (one GameState, owned by the client) and
+// a multiplayer one (many GameStates, one per room, owned by the server) without forking
+// the logic in two places.
 //
 // Play style: each player is dealt hole cards once and keeps them for the whole game.
 // The game runs for ROUNDS rounds; each round reveals one community stat category, has
@@ -81,25 +84,18 @@ import { shuffle } from './utils.js';
  * @typedef {(actingId?: number, lastAction?: LastAction) => void} RenderFn
  */
 
+/**
+ * Asks whoever's actually behind seat `seatId` for their next action and resolves once
+ * they answer. The single-player client implements this with a resolver stashed until
+ * a button click fires; the multiplayer server implements it with a resolver stashed
+ * per room-and-seat until the right authenticated socket sends a 'game-action' message
+ * (or a disconnect grace period expires and it auto-folds them).
+ * @typedef {(seatId: number) => Promise<BettingAction>} RequestActionFn
+ */
+
 export const ANTE = 20;
 export const START_CHIPS = 1000;
 export const ROUNDS = 3;
-
-/**
- * @typedef {Object} AppState
- * @property {GameState|null} G Current game, or null before one has started.
- * @property {((result: BettingAction) => void)|null} resolveHuman Pending resolver waiting on the human's next action.
- * @property {boolean} handInProgress
- */
-
-// state.G is the current game (null before a game starts). state.resolveHuman is the
-// pending Promise resolver waiting on the human player's next action, if any.
-/** @type {AppState} */
-export const state = {
-  G: null,
-  resolveHuman: null,
-  handInProgress: false
-};
 
 /**
  * @param {number} numOpponents
@@ -108,9 +104,21 @@ export const state = {
 export function makeGame(numOpponents){
   const names = ["You"];
   for(let i=1;i<=numOpponents;i++) names.push("CPU "+i);
+  return makeGameFromPlayers(names.map((n,i)=>({id:i, name:n, isAI:i!==0})));
+}
+
+// The generic constructor behind makeGame — takes an arbitrary list of seats (id, name,
+// isAI) rather than assuming "seat 0 is the human, the rest are CPUs". A multiplayer
+// room builds its GameState by passing every connected player's own id/username here,
+// all isAI:false, since there are no CPU seats once real people fill a room.
+/**
+ * @param {{id:number, name:string, isAI:boolean}[]} seats
+ * @returns {GameState}
+ */
+export function makeGameFromPlayers(seats){
   return {
-    players: names.map((n,i)=>({
-      id:i, name:n, isAI:i!==0, chips:START_CHIPS, hole:[], folded:false,
+    players: seats.map(s=>({
+      id:s.id, name:s.name, isAI:s.isAI, chips:START_CHIPS, hole:[], folded:false,
       roundBet:0, allIn:false, wonCategories:[]
     })),
     pot:0,
@@ -123,20 +131,25 @@ export function makeGame(numOpponents){
   };
 }
 
-/** @param {string} m */
-export function logMsg(m){
-  const G = state.G;
+/**
+ * @param {GameState} G
+ * @param {string} m
+ */
+export function logMsg(G, m){
   G.log.unshift(m);
   if(G.log.length>60) G.log.pop();
 }
 
-/** @returns {GamePlayer[]} */
-export function activePlayers(){ return state.G.players.filter(p=>!p.folded); }
+/**
+ * @param {GameState} G
+ * @returns {GamePlayer[]}
+ */
+export function activePlayers(G){ return G.players.filter(p=>!p.folded); }
 
 // Deals hole cards once for the whole game and picks the ROUNDS categories that will be
 // revealed one per round. Called once at the start of a game, never between rounds.
-export function startNewGame(){
-  const G = state.G;
+/** @param {GameState} G */
+export function startNewGame(G){
   G.gameNum++;
   G.pot = 0;
   G.round = 1;
@@ -145,7 +158,9 @@ export function startNewGame(){
   G.roundResult = undefined;
   G.gameResult = undefined;
 
-  // remove broke players between games (the human seat always stays)
+  // remove broke players between games (seat 0 — single-player's human — always stays;
+  // multiplayer games don't currently span multiple makeGame() calls, so this mainly
+  // matters for the local single-player client)
   G.players = G.players.filter(p=> p.id===0 || p.chips>0);
 
   G.players.forEach(p=>{ p.folded=false; p.roundBet=0; p.allIn=false; p.wonCategories=[]; p.hole=[]; });
@@ -157,13 +172,13 @@ export function startNewGame(){
   G.roundCats = shuffle(CATS).slice(0, ROUNDS);
   G.revealedCats = [];
 
-  logMsg(`Game #${G.gameNum}: hole cards dealt for a ${ROUNDS}-round match.`);
+  logMsg(G, `Game #${G.gameNum}: hole cards dealt for a ${ROUNDS}-round match.`);
 }
 
 // Reveals the current round's single community card, collects antes into a fresh pot,
 // and resets folded/betting state so everyone gets to act on the new card.
-export function startRound(){
-  const G = state.G;
+/** @param {GameState} G */
+export function startRound(G){
   G.pot = 0;
   G.stage = 'betting';
   G.players.forEach(p=>{ p.folded=false; p.roundBet=0; p.allIn=false; });
@@ -176,5 +191,27 @@ export function startRound(){
     p.chips -= ante;
     G.pot += ante;
   });
-  logMsg(`--- Round ${G.round}/${ROUNDS}: ${cat.icon} ${cat.label} --- everyone antes $${ANTE}. Pot: $${G.pot}`);
+  logMsg(G, `--- Round ${G.round}/${ROUNDS}: ${cat.icon} ${cat.label} --- everyone antes $${ANTE}. Pot: $${G.pot}`);
+}
+
+// The one place hidden information gets redacted before a GameState is allowed to leave
+// the process it's authoritative in. Own hole cards are always visible; everyone else's
+// are hidden until the same moment the UI already reveals them at — round-result or
+// game-over — reusing that existing rule rather than inventing a second one. A local
+// single-player client never needs this (there's nothing to hide from yourself), but a
+// multiplayer server must call this before sending state to any socket, always.
+/**
+ * @param {GameState} G
+ * @param {number} seatId
+ * @returns {GameState}
+ */
+export function viewFor(G, seatId){
+  const revealHoles = G.stage==='round-result' || G.stage==='game-over';
+  return {
+    ...G,
+    players: G.players.map(p=>{
+      if(p.id===seatId || revealHoles) return p;
+      return {...p, hole: p.hole.map(()=>null)};
+    })
+  };
 }

@@ -3,6 +3,8 @@
 // and ready — no game logic here at all. That's phase 3, which will attach a real
 // per-room GameState (see js/state.js) once a room actually starts.
 
+import crypto from 'node:crypto';
+
 /**
  * @typedef {Object} Seat
  * @property {number} userId
@@ -26,15 +28,17 @@ export const rooms = new Map();
 // Matches the single-player game's "you + up to 2 opponents" ceiling for now.
 export const MAX_SEATS = 3;
 
-let nextRoomNum = 1;
-
 /**
  * @param {number} hostUserId
  * @param {string} hostUsername
  * @returns {Room}
  */
 export function createRoom(hostUserId, hostUsername){
-  const id = `room-${nextRoomNum++}`;
+  // A real UUID, not an incrementing counter — match_results.room_id has to stay
+  // unique across server restarts (the counter resets to 1 every boot, but the
+  // database doesn't), or an old match's rows and a new match's rows can collide
+  // under the same id and get conflated in the (future) leaderboard.
+  const id = crypto.randomUUID();
   /** @type {Room} */
   const room = {
     id,
