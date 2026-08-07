@@ -86,12 +86,30 @@ export async function resolveRound(G, render){
     G.roundResult = {category:cat, winners, uncontested:false, values};
   }
 
-  if(G.round>=ROUNDS){
-    const best = Math.max(...G.players.map(p=>p.wonCategories.length));
-    const gameWinners = G.players.filter(p=>p.wonCategories.length===best).map(p=>p.id);
+  // Anyone the round just left at $0 is out for the rest of the game — cards removed,
+  // no more antes/bets, spectator only. Checked here (after chips are awarded) rather
+  // than in startRound, since going broke is itself an outcome of this round's betting.
+  G.players.forEach(p=>{
+    if(!p.eliminated && p.chips===0){
+      p.eliminated = true;
+      logMsg(G, `${p.name} is out of chips and becomes a spectator.`);
+    }
+  });
+
+  const remaining = G.players.filter(p=>!p.eliminated);
+  // Game ends either when only one player still has money — no need to play out the
+  // remaining rounds — or once the full round count is reached. `remaining` can't be
+  // empty here: whoever just won this round's pot gained chips before this check ran,
+  // so there's always at least one player left to be "remaining."
+  if(remaining.length<=1 || G.round>=ROUNDS){
+    const best = Math.max(...remaining.map(p=>p.chips));
+    const gameWinners = remaining.filter(p=>p.chips===best).map(p=>p.id);
     G.gameResult = {winners: gameWinners};
     G.stage = 'game-over';
-    logMsg(G, `Game over! ${gameWinners.map(id=>/** @type {import('./state.js').GamePlayer} */(G.players.find(p=>p.id===id)).name).join(' & ')} win the match with ${best} 🃏!`);
+    const names = gameWinners.map(id=>/** @type {import('./state.js').GamePlayer} */(G.players.find(p=>p.id===id)).name).join(' & ');
+    logMsg(G, remaining.length<=1
+      ? `Game over! ${names} is the last player standing with $${best}!`
+      : `Game over! ${names} win the match with $${best}!`);
   } else {
     G.stage = 'round-result';
   }

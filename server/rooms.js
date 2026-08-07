@@ -105,8 +105,8 @@ export function toggleReady(roomId, userId){
   return room;
 }
 
-// Host-only. Requires at least 2 seated players (matches the single-player game's
-// minimum of "you + 1 opponent") and everyone, including the host, ready.
+// Host-only. Requires the room to be full (always exactly MAX_SEATS players — no
+// heads-up 2-player matches) and everyone, including the host, ready.
 /**
  * @param {string} roomId
  * @param {number} userId
@@ -116,7 +116,7 @@ export function startRoom(roomId, userId){
   const room = rooms.get(roomId);
   if(!room) throw new Error('That room no longer exists.');
   if(room.hostUserId !== userId) throw new Error('Only the host can start the game.');
-  if(room.seats.length < 2) throw new Error('Need at least 2 players to start.');
+  if(room.seats.length < MAX_SEATS) throw new Error(`Need ${MAX_SEATS} players to start.`);
   if(!room.seats.every(s => s.ready)) throw new Error('Not everyone is ready yet.');
   room.status = 'started';
   return room;

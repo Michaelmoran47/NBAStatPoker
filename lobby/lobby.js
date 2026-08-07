@@ -1,18 +1,28 @@
 // @ts-check
-// Real-time lobby: browse open rooms, create/join one, ready up, host starts. No game
-// logic lives here — starting a room just proves the lobby works end to end; the
-// actual game engine gets wired into 'started' rooms in the next phase.
+// Real-time lobby: browse open rooms, create/join one, ready up, host starts — and,
+// once a room starts, the live game itself, over the exact same WebSocket connection
+// (no page navigation, no reconnect-and-lose-context for what's really one session).
+// Game rendering reuses js/ui.js's renderGame() verbatim: same HTML, same animations,
+// same onclick="humanAction(...)" markup — only where the state comes from differs.
+
+import { renderGame } from '../js/ui.js';
 
 const app = /** @type {HTMLElement} */ (document.getElementById('app'));
 
 /** @type {{username:string}|null} */
 let me = null;
-/** @type {'connecting'|'browse'|'room'} */
+/** @type {'connecting'|'browse'|'room'|'game'} */
 let view = 'connecting';
 /** @type {Array<{id:string, hostUsername:string, seatCount:number, maxSeats:number}>} */
 let roomList = [];
 /** @type {{id:string, hostUserId:number, maxSeats:number, seats:Array<{userId:number, username:string, ready:boolean}>, status:'waiting'|'started'}|null} */
 let currentRoom = null;
+/** @type {import('../js/state.js').GameState|null} */
+let gameState = null;
+/** @type {number|undefined} */
+let gameActingId = undefined;
+/** @type {import('../js/state.js').LastAction|undefined} */
+let gameLastAction = undefined;
 /** @type {string} */
 let error = '';
 /** @type {WebSocket|null} */
@@ -33,7 +43,7 @@ function connect(){
   socket = new WebSocket(wsUrl);
 
   socket.addEventListener('open', () => {
-    view = roomList.length || currentRoom ? view : 'browse';
+    view = roomList.length || currentRoom || gameState ? view : 'browse';
     render();
   });
 
@@ -41,7 +51,7 @@ function connect(){
     const msg = JSON.parse(event.data);
     if(msg.type === 'room-list'){
       roomList = msg.rooms;
-      if(!currentRoom) view = 'browse';
+      if(!currentRoom && !gameState) view = 'browse';
     } else if(msg.type === 'room-state'){
       currentRoom = msg.room;
       view = 'room';
@@ -50,6 +60,12 @@ function connect(){
       currentRoom = null;
       view = 'browse';
       error = 'The host left — room closed.';
+    } else if(msg.type === 'game-state'){
+      gameState = msg.state;
+      gameActingId = msg.actingId;
+      gameLastAction = msg.lastAction;
+      view = 'game';
+      error = '';
     } else if(msg.type === 'error'){
       error = msg.message;
     }
@@ -58,7 +74,7 @@ function connect(){
 
   socket.addEventListener('close', () => {
     view = 'connecting';
-    error = 'Disconnected from the lobby — reconnecting…';
+    error = 'Disconnected — reconnecting…';
     render();
     setTimeout(connect, 1500);
   });
@@ -79,15 +95,30 @@ function render(){
     return;
   }
 
+  if(view === 'game' && gameState){
+    renderGame(gameState, gameActingId, gameLastAction, mySeatId(), 'multiplayer');
+    // renderGame() only knows about the shared GameState, not the network layer — a
+    // rejected game-action (e.g. "It is not your turn.") arrives as a separate 'error'
+    // message that would otherwise vanish silently in this view, so surface it here
+    // instead of only in the room/browse screens.
+    if(error){
+      const banner = document.createElement('div');
+      banner.className = 'game-error-toast';
+      banner.textContent = error;
+      app.prepend(banner);
+    }
+    return;
+  }
+
   if(view === 'room' && currentRoom){
     const room = currentRoom;
     const mySeat = room.seats.find(s => s.userId === myUserId());
     const isHost = room.hostUserId === myUserId();
-    const canStart = isHost && room.status === 'waiting' && room.seats.length >= 2 && room.seats.every(s => s.ready);
+    const canStart = isHost && room.status === 'waiting' && room.seats.length >= room.maxSeats && room.seats.every(s => s.ready);
 
     app.innerHTML = `
       <div class="id-card lobby-card">
-        <h1 class="lobby-title">🏀 Room ${escapeHtml(room.id)}</h1>
+        <h1 class="lobby-title">🏀 Room ${escapeHtml(room.id.slice(0,8))}</h1>
         <div class="seat-list">
           ${room.seats.map(s => `
             <div class="seat-row">
@@ -98,16 +129,14 @@ function render(){
               </span>
             </div>`).join('')}
         </div>
-        ${room.status==='started' ? `
-          <p class="lobby-status">🎉 Game started! The real table isn't wired up here yet —
-          that's the next phase. This just proves the lobby itself works end to end.</p>
-        ` : `
-          <div class="lobby-error">${escapeHtml(error)}</div>
-          <div class="lobby-actions">
-            <button class="btn-next" id="readyBtn">${mySeat?.ready ? 'Not Ready' : 'Ready'}</button>
-            ${isHost ? `<button class="btn-next" id="startBtn" ${canStart?'':'disabled'}>Start Game</button>` : ''}
-          </div>
-        `}
+        ${room.seats.length < room.maxSeats
+          ? `<p class="lobby-status">Waiting for ${room.maxSeats - room.seats.length} more player${room.maxSeats - room.seats.length === 1 ? '' : 's'} to join — needs ${room.maxSeats} to start.</p>`
+          : ''}
+        <div class="lobby-error">${escapeHtml(error)}</div>
+        <div class="lobby-actions">
+          <button class="btn-next" id="readyBtn">${mySeat?.ready ? 'Not Ready' : 'Ready'}</button>
+          ${isHost ? `<button class="btn-next" id="startBtn" ${canStart?'':'disabled'}>Start Game</button>` : ''}
+        </div>
         <button class="btn-next btn-secondary" id="leaveBtn">Leave Room</button>
       </div>`;
 
@@ -152,11 +181,48 @@ function myUserId(){
   return currentRoom?.seats.find(s => s.username === me?.username)?.userId ?? -1;
 }
 
+// Same idea as myUserId(), but for the in-game GameState — a player id, matched by
+// name since that's the only thing the server's per-player view and this client agree
+// on without the client needing to track its own seat number across reconnects.
+function mySeatId(){
+  return gameState?.players.find(p => p.name === me?.username)?.id ?? -1;
+}
+
 /** @param {string} s */
 function escapeHtml(s){
   const div = document.createElement('div');
   div.textContent = s ?? '';
   return div.innerHTML;
 }
+
+// --- Globals renderGame()'s generated HTML calls directly via onclick="..." ---
+// (the same bridging pattern js/main.js uses for the solo page).
+
+/**
+ * @param {'fold'|'call'|'raise'} action
+ * @param {number} [amount]
+ */
+function humanAction(action, amount){
+  send({type: 'game-action', action, amount});
+}
+
+function doRaise(){
+  const slider = /** @type {HTMLInputElement} */ (document.getElementById('raiseSlider'));
+  humanAction('raise', parseInt(slider.value, 10));
+}
+
+/** @param {string} value */
+function updateRaiseLabel(value){
+  const btn = document.getElementById('raiseBtn');
+  if(btn) btn.textContent = 'Raise ' + value;
+}
+
+// The match is over and the server has already torn its live game down — simplest
+// correct reset is a full reload rather than hand-unwinding this file's local state.
+function backToLobby(){
+  location.reload();
+}
+
+Object.assign(window, { humanAction, doRaise, updateRaiseLabel, backToLobby });
 
 init();

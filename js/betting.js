@@ -105,17 +105,35 @@ export async function bettingRound(G, render, requestAction){
   /** @type {Set<number>} */
   let acted = new Set();
   let guard = 0;
+  // Index into `order` to resume scanning from — NOT reset to 0 each iteration. Without
+  // this, the search below always re-scanned from seat 0 on every iteration, so after a
+  // raise from anyone but the first seat, action jumped back to seat 0 instead of
+  // continuing around the table to the next seat in line (visible as turns going e.g.
+  // player1, player2, player1, player3 instead of player1, player2, player3, player1).
+  let cursor = 0;
 
   while(guard++ < 200){
     const active = G.players.filter(p=>!p.folded);
     if(active.length<=1) break;
 
     const maxBet = currentMaxBet(G);
-    const needsAction = order.find(pid=>{
+    /** @type {number|undefined} */
+    let needsAction;
+    for(let i=0;i<order.length;i++){
+      const idx = (cursor+i) % order.length;
+      const pid = order[idx];
       const p = G.players.find(x=>x.id===pid);
-      if(!p || p.folded || p.allIn) return false;
-      return !acted.has(pid) || p.roundBet < maxBet;
-    });
+      if(!p || p.folded || p.allIn) continue;
+      if(!acted.has(pid) || p.roundBet < maxBet){ needsAction = pid; cursor = idx; break; }
+    }
+    // betting.js is loaded by both the browser (single-player) and Node (server) —
+    // `process` only exists in the latter, and isn't declared at all in the client's
+    // jsconfig.json (no @types/node there), so this goes through `globalThis` with an
+    // `any` cast rather than referencing the bare identifier.
+    const proc = /** @type {any} */ (globalThis).process;
+    if(proc?.env?.DEBUG_BETTING){
+      console.log('[bettingRound]', {maxBet, acted:[...acted], needsAction, players: G.players.map(p=>({id:p.id, folded:p.folded, allIn:p.allIn, roundBet:p.roundBet, chips:p.chips}))});
+    }
     if(needsAction===undefined) break;
 
     const p = /** @type {import('./state.js').GamePlayer} */ (G.players.find(x=>x.id===needsAction));
@@ -140,6 +158,7 @@ export async function bettingRound(G, render, requestAction){
     }
 
     acted.add(p.id);
+    cursor = (cursor+1) % order.length; // resume the next scan from the seat right after this one
     // Passing what just happened lets the UI play a one-shot animation (chip flight,
     // fold fade, pot bump, check tap) for this render only — betting.js still never
     // touches the DOM itself, it just tells the render callback what occurred.

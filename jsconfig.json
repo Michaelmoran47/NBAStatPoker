@@ -9,5 +9,5 @@
     "noEmit": true,
     "strict": false
   },
-  "include": ["js/**/*.js"]
+  "include": ["js/**/*.js", "auth/**/*.js", "lobby/**/*.js"]
 }

@@ -7,6 +7,22 @@
 import { ANTE, ROUNDS, makeGame, activePlayers } from './state.js';
 import { currentMaxBet } from './betting.js';
 import { playGame, nextRound as engineNextRound } from './engine.js';
+import { CATS } from './data.js';
+
+// A Category's `fmt` is a function — fine for solo play, where the GameState is a live
+// JS object, but a multiplayer GameState travels over the wire as JSON, and
+// JSON.stringify silently drops function-valued properties. A category object received
+// from the server has everything *except* fmt. Always resolve fmt from this client's
+// own local CATS by key instead of trusting the transmitted object to carry it.
+/**
+ * @param {string} key
+ * @param {number} value
+ * @returns {string}
+ */
+function fmtStat(key, value){
+  const cat = CATS.find(c=>c.key===key);
+  return cat ? cat.fmt(value) : String(value);
+}
 
 // This client's own local game session — state.js itself holds no mutable state any
 // more (see its header comment), so the one-and-only GameState a solo game needs to
@@ -42,7 +58,9 @@ export function renderStart(){
       <p>Each player is dealt 2 "hole" NBA legends and keeps them for the whole game.
       ${ROUNDS} community cards are revealed one at a time — a stat category each — with
       a round of betting before every reveal. Whoever has the higher combined stat wins
-      that card. Most community cards after ${ROUNDS} rounds wins the match.</p>
+      that card and its pot. The goal is to end up with the most money — go broke and
+      you're out for the rest of the match. Whoever has the most chips when only one
+      player's left, or after ${ROUNDS} rounds, wins.</p>
       <div>
         Opponents:
         <select id="numOpp">
@@ -57,7 +75,10 @@ export function renderStart(){
         raise, or fold). Whoever has the higher combined stat across their two hole players
         wins the card and that round's pot — ties split the pot and every tied player gets
         the card. This repeats ${ROUNDS} times with the same hole cards throughout.
-        Whoever has won the most community cards after ${ROUNDS} rounds wins the match.
+        If your bank hits $0 after a round, you're eliminated and become a spectator for
+        the rest of the match. The match ends the moment only one player still has money
+        left, or after ${ROUNDS} rounds if everyone's still in — whoever has the most
+        chips at that point wins.
       </div>
     </div>`;
 }
@@ -102,18 +123,24 @@ const PERSON_ICON = `<svg class="id-icon" viewBox="0 0 200 260">
  * @param {boolean} justChecked
  */
 function renderSeat(p, actingId, revealHoles, side, justChecked){
-  return `
-    <div class="seat ${side} ${p.folded?'folded':''} ${actingId===p.id?'acting':''} ${justChecked?'just-checked':''}" data-seat="${p.id}">
-      ${justChecked ? `<div class="check-tap">✊</div>` : ''}
-      <div class="seat-cards">
+  // A player who's busted has their cards removed for the rest of the match — no
+  // card-backs to hide behind, just a spectator tag where their chip count used to be.
+  const cardsHtml = p.eliminated
+    ? `<div class="spectator-tag">Spectator</div>`
+    : `<div class="seat-cards">
         ${[0,1].map(i=>{
           return revealHoles
             ? `<div class="mini-card revealed">${p.hole[i].name.split(' ').slice(-1)[0]}</div>`
             : `<div class="mini-card back">🏀</div>`;
         }).join('')}
-      </div>
+      </div>`;
+
+  return `
+    <div class="seat ${side} ${p.folded?'folded':''} ${p.eliminated?'eliminated':''} ${actingId===p.id?'acting':''} ${justChecked?'just-checked':''}" data-seat="${p.id}">
+      ${justChecked ? `<div class="check-tap">✊</div>` : ''}
+      ${cardsHtml}
       <div class="seat-name">${p.name}</div>
-      <div class="seat-chips chip-amount">$${p.chips}${p.allIn?' (all-in)':''}</div>
+      ${p.eliminated ? '' : `<div class="seat-chips chip-amount">$${p.chips}${p.allIn?' (all-in)':''}</div>`}
       <div class="cards-tally">${p.wonCategories.map(c=>c.icon).join('')}</div>
     </div>`;
 }
@@ -147,6 +174,10 @@ function flyChip(fromSelector, delay){
   }, delay || 0);
 }
 
+// Local single-player wiring: renderGame always needs a GameState + whose seat is
+// "you" explicitly, but engine.js's RenderFn only ever calls render(actingId,
+// lastAction) — this closes over this client's own state/seat (always 0) so that
+// shape still matches, without renderGame itself needing to assume single-player.
 /**
  * @param {number} [actingId] Whose turn it is right now, if anyone.
  * @param {import('./state.js').LastAction} [lastAction] What just happened,
@@ -154,15 +185,33 @@ function flyChip(fromSelector, delay){
  *   pot bump, check tap) — set only on the render call immediately after an action is applied.
  */
 export function render(actingId, lastAction){
-  const G = state.G;
-  if(!G){ renderStart(); return; }
-  const app = /** @type {HTMLElement} */ (document.getElementById('app'));
-  const human = /** @type {import('./state.js').GamePlayer} */ (G.players.find(p=>p.id===0));
-  const opponents = G.players.filter(p=>p.id!==0);
+  if(!state.G){ renderStart(); return; }
+  renderGame(state.G, actingId, lastAction, 0, 'solo');
+}
 
-  // Hole cards flip face-up once a round has resolved — the numbers matter every round,
-  // but who's actually holding them stays a mystery until there's a card on the line.
-  const revealHoles = G.stage==='round-result' || G.stage==='game-over';
+// The shared render — used directly by the local single-player wrapper above, and by
+// the multiplayer client (lobby/lobby.js) with server-pushed state instead of a local
+// GameState, and mySeatId taken from wherever the player actually ended up sitting
+// (join order, not always 0). 'solo' vs 'multiplayer' only changes two things: whether
+// "Next Round" is clickable (multiplayer's server advances rounds on its own timer —
+// nothing is waiting on that click) and what happens after game-over.
+/**
+ * @param {import('./state.js').GameState} G
+ * @param {number|undefined} actingId Whose turn it is right now, if anyone.
+ * @param {import('./state.js').LastAction|undefined} lastAction What just happened,
+ *   so this render can play the matching one-shot animation (chip flight, fold fade,
+ *   pot bump, check tap) — set only on the render call immediately after an action is applied.
+ * @param {number} mySeatId Which player id is "you".
+ * @param {'solo'|'multiplayer'} mode
+ */
+export function renderGame(G, actingId, lastAction, mySeatId, mode){
+  const app = /** @type {HTMLElement} */ (document.getElementById('app'));
+  const human = /** @type {import('./state.js').GamePlayer} */ (G.players.find(p=>p.id===mySeatId));
+  const opponents = G.players.filter(p=>p.id!==mySeatId);
+
+  // Hole cards stay face-down for the entire match — who's actually holding what stays
+  // a mystery until the very end, even after individual rounds resolve.
+  const revealHoles = G.stage==='game-over';
   const checkedId = lastAction && lastAction.action==='check' ? lastAction.playerId : null;
 
   const seatLeft = opponents[0] ? renderSeat(opponents[0], actingId, revealHoles, 'seat-left', checkedId===opponents[0].id) : `<div class="seat-left"></div>`;
@@ -186,7 +235,8 @@ export function render(actingId, lastAction){
     return `<div class="pip ${done?'done':''} ${now?'now':''}"></div>`;
   }).join('');
 
-  const holeHtml = human.hole.length ? human.hole.map(pl=>`
+  // Busted players have their cards removed for the rest of the match, same as opponents.
+  const holeHtml = human.hole.length && !human.eliminated ? human.hole.map(pl=>`
     <div class="id-card player-card">
       ${PERSON_ICON}
       <div class="card-rule"></div>
@@ -196,7 +246,7 @@ export function render(actingId, lastAction){
   const maxBet = currentMaxBet(G);
   const need = human.folded ? 0 : maxBet - human.roundBet;
   const callAmount = Math.min(need, human.chips); // what Call would actually cost, clamped to an all-in
-  const humanTurn = actingId===0 && !human.folded && G.stage==='betting';
+  const humanTurn = actingId===mySeatId && !human.folded && G.stage==='betting';
 
   const minRaiseTo = maxBet+20;
   const maxRaiseTo = human.chips+human.roundBet;
@@ -216,7 +266,7 @@ export function render(actingId, lastAction){
           ${canRaise ? `<button class="btn btn-raise" id="raiseBtn" onclick="doRaise()">Raise ${raiseDefault}</button>` : ''}
         </div>
         ${canRaise ? `<input type="range" class="raise-slider" id="raiseSlider" min="${minRaiseTo}" max="${maxRaiseTo}" step="10" value="${raiseDefault}" oninput="updateRaiseLabel(this.value)">` : ''}
-      </div>` : `<div class="controls"><div class="status-line">Waiting on other players…</div></div>`;
+      </div>` : `<div class="controls"><div class="status-line">${human.eliminated ? "You're out — watching the rest of the match." : 'Waiting on other players…'}</div></div>`;
   }
 
   let roundResultHtml = '';
@@ -230,11 +280,15 @@ export function render(actingId, lastAction){
         <table class="breakdown"><thead><tr><th>Player</th>${active.map(p=>`<th>${p.name}</th>`).join('')}</tr></thead>
         <tbody><tr><td>${rr.category.icon} ${rr.category.label}</td>${active.map(p=>{
           const val = /** @type {Object<number,number>} */(rr.values)[p.id];
-          return `<td class="${rr.winners.includes(p.id)?'winner-cell':''}">${rr.category.fmt(val)}</td>`;
+          return `<td class="${rr.winners.includes(p.id)?'winner-cell':''}">${fmtStat(rr.category.key, val)}</td>`;
         }).join('')}</tr></tbody></table>
         <p><b>${winnerNames} won the card!</b> (+1 🃏 each)</p>
       `}
-      ${G.stage==='round-result' ? `<button class="btn-next" onclick="nextRound()">Next Round</button>` : ''}
+      ${G.stage==='round-result'
+        ? (mode==='solo'
+            ? `<button class="btn-next" onclick="nextRound()">Next Round</button>`
+            : `<p class="status-line">Next round starting…</p>`)
+        : ''}
     </div>`;
   }
 
@@ -246,7 +300,9 @@ export function render(actingId, lastAction){
       <h2>🏆 Game Over</h2>
       <p>${G.players.map(p=>`${p.name}: ${p.wonCategories.map(c=>c.icon).join('') || '—'}`).join(' &nbsp;|&nbsp; ')}</p>
       <p><b>${winnerNames} win${gr.winners.length===1?'s':''} the match!</b></p>
-      <button class="btn-next" onclick="renderStart()">New Game</button>
+      ${mode==='solo'
+        ? `<button class="btn-next" onclick="renderStart()">New Game</button>`
+        : `<button class="btn-next" onclick="backToLobby()">Back to Lobby</button>`}
     </div>`;
   }
 
@@ -269,11 +325,13 @@ export function render(actingId, lastAction){
       ${seatRight}
     </div>
 
-    <div class="you-seat ${human.folded?'folded':''} ${checkedId===0?'just-checked':''}" data-seat="0">
-      ${checkedId===0 ? `<div class="check-tap">✊</div>` : ''}
-      <div class="hole-cards ${lastAction && lastAction.playerId===0 && lastAction.action==='fold' ? 'just-folded' : ''}">${holeHtml}</div>
+    <div class="you-seat ${human.folded?'folded':''} ${human.eliminated?'eliminated':''} ${checkedId===mySeatId?'just-checked':''}" data-seat="${mySeatId}">
+      ${checkedId===mySeatId ? `<div class="check-tap">✊</div>` : ''}
+      ${human.eliminated
+        ? `<div class="spectator-tag">Spectator</div>`
+        : `<div class="hole-cards ${lastAction && lastAction.playerId===mySeatId && lastAction.action==='fold' ? 'just-folded' : ''}">${holeHtml}</div>`}
       <div class="you-header">
-        <div class="you-name">You${human.folded?' (folded)':''}</div>
+        <div class="you-name">You${human.eliminated?' (spectator)':human.folded?' (folded)':''}</div>
         <div class="cards-tally">${human.wonCategories.map(c=>c.icon).join('')}</div>
         <div class="you-chips chip-amount">$${human.chips}</div>
       </div>

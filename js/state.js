@@ -26,6 +26,9 @@ import { shuffle } from './utils.js';
  * @property {boolean} folded Resets every round.
  * @property {number} roundBet
  * @property {boolean} allIn
+ * @property {boolean} eliminated Bank hit $0 after some round this game — permanently
+ *   out (a spectator) for the rest of the match, unlike `folded` which resets every
+ *   round. Reset to false only when a brand new game is dealt (startNewGame).
  * @property {import('./data.js').Category[]} wonCategories Community cards won so far
  *   this game, in the order they were won — the category's own icon is what gets shown
  *   next to a player's name, not a generic card glyph, so this has to be the categories
@@ -95,7 +98,7 @@ import { shuffle } from './utils.js';
 
 export const ANTE = 20;
 export const START_CHIPS = 1000;
-export const ROUNDS = 3;
+export const ROUNDS = 5;
 
 /**
  * @param {number} numOpponents
@@ -119,7 +122,7 @@ export function makeGameFromPlayers(seats){
   return {
     players: seats.map(s=>({
       id:s.id, name:s.name, isAI:s.isAI, chips:START_CHIPS, hole:[], folded:false,
-      roundBet:0, allIn:false, wonCategories:[]
+      roundBet:0, allIn:false, eliminated:false, wonCategories:[]
     })),
     pot:0,
     gameNum:0,
@@ -163,7 +166,7 @@ export function startNewGame(G){
   // matters for the local single-player client)
   G.players = G.players.filter(p=> p.id===0 || p.chips>0);
 
-  G.players.forEach(p=>{ p.folded=false; p.roundBet=0; p.allIn=false; p.wonCategories=[]; p.hole=[]; });
+  G.players.forEach(p=>{ p.folded=false; p.roundBet=0; p.allIn=false; p.eliminated=false; p.wonCategories=[]; p.hole=[]; });
 
   const deck = shuffle(POOL);
   let idx=0;
@@ -181,32 +184,40 @@ export function startNewGame(G){
 export function startRound(G){
   G.pot = 0;
   G.stage = 'betting';
-  G.players.forEach(p=>{ p.folded=false; p.roundBet=0; p.allIn=false; });
+  // Eliminated players stay folded for the rest of the game — this single line is what
+  // keeps them out of activePlayers()/betting/scoring everywhere else, without every
+  // consumer of `folded` needing to know about elimination separately.
+  G.players.forEach(p=>{ p.folded=p.eliminated; p.roundBet=0; p.allIn=false; });
 
   const cat = G.roundCats[G.round-1];
   G.revealedCats = [cat];
 
   G.players.forEach(p=>{
+    if(p.eliminated) return; // spectators don't ante into a pot they can't win
     const ante = Math.min(ANTE, p.chips);
     p.chips -= ante;
     G.pot += ante;
+    // A player whose ante is capped at their whole remaining stack is all-in from the
+    // moment the round starts, same as if they'd gone all-in via a bet — otherwise
+    // they'd sit at $0 without the tag until their own turn happened to come up.
+    if(p.chips===0) p.allIn = true;
   });
   logMsg(G, `--- Round ${G.round}/${ROUNDS}: ${cat.icon} ${cat.label} --- everyone antes $${ANTE}. Pot: $${G.pot}`);
 }
 
 // The one place hidden information gets redacted before a GameState is allowed to leave
 // the process it's authoritative in. Own hole cards are always visible; everyone else's
-// are hidden until the same moment the UI already reveals them at — round-result or
-// game-over — reusing that existing rule rather than inventing a second one. A local
-// single-player client never needs this (there's nothing to hide from yourself), but a
-// multiplayer server must call this before sending state to any socket, always.
+// stay hidden until the match is actually over — reusing that existing rule rather than
+// inventing a second one. A local single-player client never needs this (there's
+// nothing to hide from yourself), but a multiplayer server must call this before
+// sending state to any socket, always.
 /**
  * @param {GameState} G
  * @param {number} seatId
  * @returns {GameState}
  */
 export function viewFor(G, seatId){
-  const revealHoles = G.stage==='round-result' || G.stage==='game-over';
+  const revealHoles = G.stage==='game-over';
   return {
     ...G,
     players: G.players.map(p=>{

@@ -134,7 +134,17 @@ h1{margin:6px 0 2px; font-size:1.5em; letter-spacing:1px;}
   font-variant-numeric:tabular-nums;
 }
 .seat.folded{ opacity:.45; }
+.seat.eliminated, .you-seat.eliminated{ opacity:.35; }
 .seat.acting .mini-card{ box-shadow:0 0 0 3px rgba(232,193,92,.45); }
+
+/* Busted players have their cards removed for the rest of the match — this stands in
+   for the mini-cards / hole-cards wherever a player is eliminated. */
+.spectator-tag{
+  font-family:var(--font-display); font-stretch:condensed;
+  font-size:.8em; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--text); opacity:.7;
+  padding:10px 0;
+}
 
 /* Checking: nothing changes hands, so no chip flies — instead the seat gives a
    quick knock (the physical "check" gesture at a real table) and a small tap glyph
@@ -203,6 +213,18 @@ h1{margin:6px 0 2px; font-size:1.5em; letter-spacing:1px;}
 .stat-card .icon{
   font-size:1.8em; margin-top:auto; margin-bottom:4px;
   filter:drop-shadow(0 2px 2px rgba(0,0,0,.3));
+}
+
+/* A rejected multiplayer game-action (e.g. acting out of turn) — see lobby.js — needs
+   somewhere to surface since the shared renderGame() template has no error slot of its
+   own. Pinned to the top rather than woven into the rebuild so it survives independent
+   of whatever renderGame() just replaced #app's innerHTML with. */
+.game-error-toast{
+  position:sticky; top:0; z-index:5;
+  background:rgba(29,22,15,.9); color:var(--gold);
+  border:1px solid var(--gold); border-radius:8px;
+  padding:8px 14px; margin-bottom:10px;
+  font-size:.85em; text-align:center;
 }
 
 /* ---------- Your seat ---------- */
