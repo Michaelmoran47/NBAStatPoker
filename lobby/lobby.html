@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NBA Stat Poker — Lobby</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .lobby-wrap{
+    width:100%; min-height:100vh; display:flex; align-items:flex-start; justify-content:center;
+    padding:40px 16px;
+  }
+  .lobby-card{
+    width:min(92vw, 480px);
+    padding:26px 26px 22px;
+    display:flex; flex-direction:column; align-items:stretch; gap:14px;
+  }
+  .lobby-title{
+    font-family:var(--font-display); font-stretch:condensed; font-weight:800;
+    text-transform:uppercase; letter-spacing:.03em; font-size:1.3em;
+    text-align:center; margin:0;
+  }
+  .lobby-status{ text-align:center; color:var(--ink); opacity:.7; font-size:.85em; }
+  .lobby-error{
+    color:#832e26; font-size:.85em; font-weight:600; text-align:center; min-height:1.2em;
+  }
+  .room-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:10px 12px; border-radius:10px; border:1.5px solid rgba(0,0,0,.2);
+    background:rgba(0,0,0,.04);
+  }
+  .room-row .room-info{ display:flex; flex-direction:column; }
+  .room-row .room-host{ font-weight:700; color:var(--ink); }
+  .room-row .room-seats{ font-size:.78em; color:var(--ink); opacity:.65; font-variant-numeric:tabular-nums; }
+  .room-list{ display:flex; flex-direction:column; gap:8px; max-height:320px; overflow-y:auto; }
+  .room-empty{ text-align:center; color:var(--ink); opacity:.55; font-size:.85em; padding:14px 0; }
+  .seat-list{ display:flex; flex-direction:column; gap:6px; }
+  .seat-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:9px 12px; border-radius:10px; border:1.5px solid rgba(0,0,0,.2);
+    background:rgba(0,0,0,.04);
+  }
+  .seat-row .seat-name{ font-weight:700; color:var(--ink); }
+  .seat-row .seat-tag{
+    font-family:var(--font-display); font-stretch:condensed; font-weight:800;
+    letter-spacing:.03em; text-transform:uppercase; font-size:.72em;
+    padding:3px 8px; border-radius:6px;
+  }
+  .seat-tag.ready{ background:#57b57a; color:#fff; }
+  .seat-tag.waiting{ background:rgba(0,0,0,.12); color:var(--ink); opacity:.65; }
+  .seat-tag.host{ background:var(--gold); color:var(--ink); }
+  .lobby-actions{ display:flex; gap:8px; }
+  .btn-secondary{
+    flex:1; background:transparent; box-shadow:none; border:1.5px solid rgba(0,0,0,.3);
+    color:var(--ink);
+  }
+</style>
+</head>
+<body>
+<div class="lobby-wrap">
+  <div id="app"></div>
+</div>
+<script type="module" src="lobby.js"></script>
+</body>
+</html>

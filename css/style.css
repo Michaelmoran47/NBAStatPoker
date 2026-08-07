@@ -276,6 +276,7 @@ h1{margin:6px 0 2px; font-size:1.5em; letter-spacing:1px;}
 }
 .btn-next:hover{ filter:brightness(1.08); }
 .btn-next:active{ transform:translateY(1px); }
+.btn-next:disabled{ opacity:.4; cursor:not-allowed; filter:none; transform:none; }
 
 /* gray rail, yellow chip — the chip is the same gold used for the pot/money type
    everywhere else, with a faint segmented rim so it reads as a poker chip */

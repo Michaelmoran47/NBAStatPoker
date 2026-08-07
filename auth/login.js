@@ -33,7 +33,8 @@ function render(){
       <div class="id-card auth-card">
         <h1 class="auth-title">🏀 NBA Stat Poker</h1>
         <p class="auth-status">Signed in as <b>${escapeHtml(me.username)}</b></p>
-        <a class="btn-next" href="../index.html" style="text-align:center; text-decoration:none; display:block;">Play</a>
+        <a class="btn-next" href="../index.html" style="text-align:center; text-decoration:none; display:block;">Play Solo</a>
+        <a class="btn-next" href="../lobby/lobby.html" style="text-align:center; text-decoration:none; display:block;">Multiplayer Lobby</a>
         <button class="btn-next" id="logoutBtn" style="background:transparent; box-shadow:none; border:1.5px solid rgba(0,0,0,.3); color:var(--ink);">Log Out</button>
       </div>`;
     document.getElementById('logoutBtn')?.addEventListener('click', async ()=>{

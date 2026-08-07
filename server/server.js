@@ -5,10 +5,12 @@
 import 'dotenv/config'; // loads server/.env into process.env, if that file exists
 import express from 'express';
 import session from 'express-session';
+import http from 'node:http';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { authRouter } from './auth.js';
+import { attachWebSocketServer } from './ws.js';
 import './db.js'; // creates the DB file + table on first run, as a side effect
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -27,8 +29,10 @@ if (!sessionSecret) {
 
 const app = express();
 
-app.use(express.json());
-app.use(session({
+// Built once and reused for both regular HTTP requests and the WebSocket upgrade
+// below, so a socket's session is always exactly the same session its HTTP requests
+// see — one login, no separate real-time auth step.
+const sessionMiddleware = session({
   secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
@@ -37,7 +41,10 @@ app.use(session({
     sameSite: 'lax',
     maxAge: 1000 * 60 * 60 * 24 * 30 // 30 days
   }
-}));
+});
+
+app.use(express.json());
+app.use(sessionMiddleware);
 
 app.use('/api', authRouter);
 
@@ -53,6 +60,11 @@ app.get('/api/config', (req, res) => {
 // static site, served as-is — the game itself is untouched by this phase.
 app.use(express.static(projectRoot));
 
-app.listen(PORT, () => {
+// An explicit http.Server (rather than app.listen()'s implicit one) is needed so the
+// WebSocket layer can share the exact same port via the 'upgrade' event.
+const httpServer = http.createServer(app);
+attachWebSocketServer(httpServer, sessionMiddleware);
+
+httpServer.listen(PORT, () => {
   console.log(`NBA Stat Poker server running at http://localhost:${PORT}`);
 });
