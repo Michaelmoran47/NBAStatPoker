@@ -22,7 +22,7 @@ export function currentMaxBet(G){
 // Exported so every requestAction implementation (ui.js's button-click resolver,
 // server/game-rooms.js's per-socket resolver) races the same clock instead of each
 // picking its own number, and so ui.js's countdown bar animates for exactly this long.
-export const ACTION_TIMEOUT_MS = 10_000;
+export const ACTION_TIMEOUT_MS = 30_000;
 
 // What a seat is treated as doing once its action clock runs out: check if nothing's
 // owed, fold otherwise — the same choice a real player at a table who'd stepped away
@@ -199,6 +199,6 @@ export async function bettingRound(G, render, requestAction){
     // rides along as `amount` so the UI can label the chip animation with the actual
     // dollar figure instead of leaving a call and a raise to look alike.
     render(undefined, {playerId: p.id, action: actionLabel, amount: paid});
-    await sleep(1000);
+    await sleep(150);
   }
 }
