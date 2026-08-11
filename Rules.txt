@@ -1,0 +1,18 @@
+NBA Stat Poker: a poker-style betting game where each player's "hole cards" are two NBA
+legends' career stat lines. Each round reveals one community stat category; players bet,
+then whoever has the higher combined stat wins that round's pot. The goal is to make as much money as possible before the 5 rounds are up.
+
+If after a round any player's bank equals zero, that player's cards should be removed and they become a spectator.  
+If only one player's bank is greater than zero the game is over and that player wins.
+
+Opponents cards should not be revealed until the end of all 5 rounds.
+
+Ships as a solo vs.-CPU game and, as of the most
+recent commits, a real-time multiplayer mode (accounts, lobby, live server-authoritative
+matches) built on top of the exact same game engine.
+
+
+keep icons even with a fold
+
+The Deck Algorithm: Player Index ScoreFor every player in a given season, calculate a total score based on 100 maximum points. The top 50 scores automatically make the deck.Total Score (100 Max) = [Production Score (50)] + [Accolades Score (35)] + [Notoriety Bonus (15)]
+1. Production Score (Max 50 Points)This measures how much the player actually played and produced that year.Vorp / Win Shares: Use a comprehensive advanced metric like Value Over Replacement Player (VORP) or Win Shares (WS).The Math: Find the highest VORP in the league that year and set it as 50 points. Scale everyone else proportionally. (e.g., If LeBron has a league-high VORP of 8.0, he gets 50 points. A player with a 4.0 VORP gets 25 points).2. Accolades Score (Max 35 Points)This captures elite star status and historical hardware. These points stack, but cap at 35.MVP Winner: +35 pointsAll-NBA First Team: +30 pointsAll-NBA Second/Third Team: +25 pointsAll-Star Selection: +20 pointsMajor Award Winner (DPOY, 6MOY, ROTY, MIP): +15 pointsAll-Defensive Team: +10 points3. Notoriety & Narrative Bonus (Max 15 Points)This is the "secret sauce" that captures nostalgia, deep playoff runs, and cultural relevance.Championship Ring Bonus (+5 pts): Did they win the NBA Finals that year? (Captures memorable role players on title teams like Robert Horry or Steve Kerr).Playoff Deep-Run Bonus (+5 pts): Did they make the Conference Finals? (Captures memorable playoff heroes).Draft Hype Bonus (+5 pts): Were they a Top-5 pick in the draft that same year? (Captures highly anticipated rookies who didn't win Rookie of the Year but are highly memorable, like Kwame Brown in 2001).Mandatory Hard Filters (The Guardrails)Run these binary filters before calculating the scores to instantly eliminate fringe roster spots:Games Played: Must play \(\ge \) 41 games (50% of a standard season).Minutes Played: Must average \(\ge \) 20 minutes per game.Why This Algorithm Solves Your ProblemIt catches the "Ghosts": A player like 2004 Rasheed Wallace might have lower full-season stats because of a mid-season trade, but his Championship Ring bonus and All-Star history will push him into the Top 50.It drops the "Empty Stat" players: A random backup center averaging 12 points on a 15-win team will have a low VORP, zero accolades, and zero team success bonuses, filtering them out.
