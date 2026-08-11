@@ -116,6 +116,13 @@ export function startRoom(roomId, userId){
   const room = rooms.get(roomId);
   if(!room) throw new Error('That room no longer exists.');
   if(room.hostUserId !== userId) throw new Error('Only the host can start the game.');
+  // Without this, two 'start-room' messages in quick succession (a double-click before
+  // the button disables, a client retry after a slow/dropped response) would both pass
+  // every check below and each call startLiveGame() — two independent runGame loops
+  // then drive two separate GameState instances for the same room, both broadcasting to
+  // the same players. Symptom: what looks like one match somehow anteing well past
+  // round 5, because it's actually two interleaved 5-round games.
+  if(room.status !== 'waiting') throw new Error('This room has already started.');
   if(room.seats.length < MAX_SEATS) throw new Error(`Need ${MAX_SEATS} players to start.`);
   if(!room.seats.every(s => s.ready)) throw new Error('Not everyone is ready yet.');
   room.status = 'started';
