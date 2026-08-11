@@ -65,7 +65,11 @@ export async function resolveRound(G, render){
     winner.chips += G.pot;
     winner.wonCategories.push(cat);
     logMsg(G, `${winner.name} wins the ${cat.label} card uncontested (+1 🃏).`);
-    G.roundResult = {category:cat, winners:[winner.id], uncontested:true, values:null};
+    // Still run this lone player through scoreCategories (rather than leaving `values`
+    // empty) so the round-reveal animation has a number to show even when nobody else
+    // was left to compare against.
+    const {breakdown} = scoreCategories(active, [cat]);
+    G.roundResult = {category:cat, winners:[winner.id], uncontested:true, values:{[winner.id]: breakdown[winner.id][cat.key].value}, payouts:{[winner.id]: G.pot}};
   } else {
     const {breakdown, totals} = scoreCategories(active, [cat]);
     const best = Math.max(...Object.values(totals));
@@ -76,14 +80,17 @@ export async function resolveRound(G, render){
     const values = {};
     active.forEach(p=>{ values[p.id] = breakdown[p.id][cat.key].value; });
 
+    /** @type {Object<number, number>} */
+    const payouts = {};
     winners.forEach(id=>{
       const player = /** @type {import('./state.js').GamePlayer} */ (G.players.find(p=>p.id===id));
       player.chips += share;
       player.wonCategories.push(cat);
+      payouts[id] = share;
     });
 
     logMsg(G, `${winners.map(id=>/** @type {import('./state.js').GamePlayer} */(G.players.find(p=>p.id===id)).name).join(' & ')} won the ${cat.label} card (+1 🃏 each)!`);
-    G.roundResult = {category:cat, winners, uncontested:false, values};
+    G.roundResult = {category:cat, winners, uncontested:false, values, payouts};
   }
 
   // Anyone the round just left at $0 is out for the rest of the game — cards removed,

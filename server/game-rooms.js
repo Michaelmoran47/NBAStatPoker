@@ -8,6 +8,7 @@
 
 import { makeGameFromPlayers, viewFor } from '../js/state.js';
 import { playGame, nextRound } from '../js/engine.js';
+import { ACTION_TIMEOUT_MS, timeoutAction } from '../js/betting.js';
 import { recordForfeit, recordMatchResults } from './matches.js';
 
 // Overridable only for local verification (see .claude/plans) — never set in a real
@@ -60,10 +61,27 @@ export function startLiveGame(roomId, seats, sendToSeat){
 
   const render = (/** @type {number|undefined} */ actingId, /** @type {any} */ lastAction) =>
     broadcastState(roomId, actingId, lastAction);
+  // Same ACTION_TIMEOUT_MS chess-clock as solo (js/ui.js's requestAction) — the
+  // `game.resolvers.get(seatId) === res` check is this driver's equivalent of solo's
+  // `state.resolveHuman === res` guard: it's what makes a `game-action` message that
+  // arrives just after the clock ran out a harmless no-op (submitAction below finds no
+  // matching resolver) instead of resolving whatever this seat's *next* turn is waiting
+  // on. Independent of markDisconnected's much longer RECONNECT_GRACE_MS below — that's
+  // about detecting a dropped socket, this is about pacing a turn regardless of
+  // connection status.
   /** @type {import('../js/state.js').RequestActionFn} */
   const requestAction = (seatId) => {
     if(game.disconnectedSeats.has(seatId)) return Promise.resolve({action:'fold'});
-    return new Promise(res => { game.resolvers.set(seatId, res); });
+    return new Promise(res => {
+      game.resolvers.set(seatId, res);
+      setTimeout(()=>{
+        if(game.resolvers.get(seatId) === res){
+          game.resolvers.delete(seatId);
+          const p = /** @type {import('../js/state.js').GamePlayer} */ (game.G.players.find(x=>x.id===seatId));
+          res(timeoutAction(game.G, p));
+        }
+      }, ACTION_TIMEOUT_MS);
+    });
   };
 
   runGame(roomId, game, render, requestAction);

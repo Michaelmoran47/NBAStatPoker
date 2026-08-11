@@ -47,7 +47,15 @@ import { shuffle } from './utils.js';
  * @property {import('./data.js').Category} category
  * @property {number[]} winners Player ids who won this round's card.
  * @property {boolean} uncontested True if everyone else folded.
- * @property {Object<number, number>|null} values Each active player's combined stat for this round's category.
+ * @property {Object<number, number>} values Each active player's combined stat for this round's category — always
+ *   populated (including the uncontested case, where there's only one entry) so the UI can show it during the
+ *   round-reveal animation regardless of how the round ended.
+ * @property {Object<number, number>} payouts How much each winner's chips (already
+ *   credited by the time this GameState reaches render()) actually went up by this round
+ *   — one entry per id in `winners`. The UI subtracts this back out to show a winner's
+ *   pre-round total during the reveal, only "landing" it once the card-to-winner
+ *   animation actually arrives, so money and the tally icon never appear before the
+ *   animation that's supposed to deliver them.
  */
 
 /**
@@ -79,7 +87,9 @@ import { shuffle } from './utils.js';
  * applied — lets the UI play a one-shot animation (chip flight, fold fade, pot bump,
  * check tap) without betting.js/engine.js touching the DOM themselves. 'check' is a
  * zero-cost 'call' — betting.js resolves the distinction before render ever sees it.
- * @typedef {{playerId:number, action:'fold'|'call'|'raise'|'check'}} LastAction
+ * `amount` is what was actually paid this action (omitted for fold/check) — the UI
+ * labels the chip animation with it so a call and a raise never look ambiguous.
+ * @typedef {{playerId:number, action:'fold'|'call'|'raise'|'check', amount?:number}} LastAction
  */
 
 /**
@@ -92,13 +102,20 @@ import { shuffle } from './utils.js';
  * they answer. The single-player client implements this with a resolver stashed until
  * a button click fires; the multiplayer server implements it with a resolver stashed
  * per room-and-seat until the right authenticated socket sends a 'game-action' message
- * (or a disconnect grace period expires and it auto-folds them).
+ * (or a disconnect grace period expires and it auto-folds them). Both implementations
+ * also race that stashed resolver against betting.js's ACTION_TIMEOUT_MS action clock —
+ * see timeoutAction() there for what a seat is treated as doing if it runs out.
  * @typedef {(seatId: number) => Promise<BettingAction>} RequestActionFn
  */
 
-export const ANTE = 20;
-export const START_CHIPS = 1000;
+export const ANTE = 2;
+export const START_CHIPS = 20;
 export const ROUNDS = 5;
+// The smallest amount a raise must increase the current bet by. Tied to ANTE (not a
+// separate hardcoded number) so shrinking/growing the stakes — like START_CHIPS above —
+// keeps raises proportionally meaningful instead of silently becoming "must go all-in"
+// or "meaninglessly tiny" relative to a player's stack.
+export const MIN_RAISE = ANTE;
 
 /**
  * @param {number} numOpponents

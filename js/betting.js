@@ -4,7 +4,7 @@
 // callback for that, so the exact same loop drives a local human's button clicks or a
 // network-connected player's socket messages.
 
-import { logMsg, activePlayers } from './state.js';
+import { logMsg, activePlayers, MIN_RAISE } from './state.js';
 import { scoreCategories } from './scoring.js';
 import { sleep } from './utils.js';
 
@@ -14,6 +14,35 @@ import { sleep } from './utils.js';
  */
 export function currentMaxBet(G){
   return Math.max(0, ...G.players.filter(p=>!p.folded).map(p=>p.roundBet));
+}
+
+// How long a non-AI seat gets to act before the game moves on without them — an actual
+// chess-clock, not the multiplayer reconnect grace period (that's about detecting a
+// dropped connection; this is about pacing a turn regardless of connection status).
+// Exported so every requestAction implementation (ui.js's button-click resolver,
+// server/game-rooms.js's per-socket resolver) races the same clock instead of each
+// picking its own number, and so ui.js's countdown bar animates for exactly this long.
+export const ACTION_TIMEOUT_MS = 10_000;
+
+// What a seat is treated as doing once its action clock runs out: check if nothing's
+// owed, fold otherwise — the same choice a real player at a table who'd stepped away
+// would end up making by default. Kept here (not duplicated in each driver) since it
+// needs the same currentMaxBet math the rest of this file already does.
+/**
+ * @param {import('./state.js').GameState} G
+ * @param {import('./state.js').GamePlayer} p
+ * @returns {import('./state.js').BettingAction}
+ */
+export function timeoutAction(G, p){
+  const need = currentMaxBet(G) - p.roundBet;
+  return need>0 ? {action:'fold'} : {action:'call'}; // a zero-cost call is a check
+}
+
+// A fixed CPU "reaction time" reads as robotic; a randomized one within a human-ish
+// window is what actually sells the illusion of playing against a person who's
+// weighing the decision, not a script executing instantly.
+function cpuThinkDelay(){
+  return 800 + Math.random()*1400;
 }
 
 /**
@@ -40,6 +69,8 @@ export function applyCall(G, p){
  * @param {import('./state.js').GameState} G
  * @param {import('./state.js').GamePlayer} p
  * @param {number} raiseTo
+ * @returns {number} What was actually paid this action — same convention as applyCall,
+ *   so bettingRound can label the chip animation with it either way.
  */
 export function applyRaise(G, p, raiseTo){
   const need = raiseTo - p.roundBet;
@@ -47,6 +78,7 @@ export function applyRaise(G, p, raiseTo){
   p.chips -= pay; p.roundBet += pay; G.pot += pay;
   if(p.chips===0) p.allIn = true;
   logMsg(G, `${p.name} raises to $${p.roundBet}.`);
+  return pay;
 }
 
 /**
@@ -84,7 +116,7 @@ export function aiDecide(G, p){
 
   if(action==='fold'){ return {action:'fold'}; }
   if(action==='raise'){
-    const raiseAmt = Math.max(20, Math.round(G.pot*0.4/10)*10);
+    const raiseAmt = Math.max(MIN_RAISE, Math.round(G.pot*0.4/MIN_RAISE)*MIN_RAISE);
     const raiseTo = Math.min(p.chips+p.roundBet, maxBet + raiseAmt);
     return {action:'raise', amount: raiseTo};
   }
@@ -144,25 +176,29 @@ export async function bettingRound(G, render, requestAction){
     if(!p.isAI){
       result = await requestAction(p.id);
     } else {
-      await sleep(650);
+      await sleep(cpuThinkDelay());
       result = aiDecide(G, p);
     }
 
     /** @type {'fold'|'call'|'raise'|'check'} */
     let actionLabel = result.action;
+    /** @type {number|undefined} */
+    let paid;
     if(result.action==='fold'){ applyFold(G, p); }
-    else if(result.action==='raise'){ applyRaise(G, p, result.amount); acted = new Set(); }
+    else if(result.action==='raise'){ paid = applyRaise(G, p, result.amount); acted = new Set(); }
     else {
-      const pay = applyCall(G, p);
-      if(pay===0) actionLabel = 'check'; // a zero-cost call is a check — different animation, no chip flies
+      paid = applyCall(G, p);
+      if(paid===0) actionLabel = 'check'; // a zero-cost call is a check — different animation, no chip flies
     }
 
     acted.add(p.id);
     cursor = (cursor+1) % order.length; // resume the next scan from the seat right after this one
     // Passing what just happened lets the UI play a one-shot animation (chip flight,
     // fold fade, pot bump, check tap) for this render only — betting.js still never
-    // touches the DOM itself, it just tells the render callback what occurred.
-    render(undefined, {playerId: p.id, action: actionLabel});
-    await sleep(150);
+    // touches the DOM itself, it just tells the render callback what occurred. `paid`
+    // rides along as `amount` so the UI can label the chip animation with the actual
+    // dollar figure instead of leaving a call and a raise to look alike.
+    render(undefined, {playerId: p.id, action: actionLabel, amount: paid});
+    await sleep(1000);
   }
 }
