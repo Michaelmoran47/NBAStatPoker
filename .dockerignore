@@ -1,0 +1,12 @@
+# Host-built native modules (wrong platform/arch) — the Dockerfile builds its own
+# server/node_modules inside the image instead.
+node_modules
+server/node_modules
+
+# Local dev DB — server/db.js creates a fresh one on first boot; a real deployment
+# should use a persistent volume, not whatever happens to be on disk at build time.
+server/data
+
+.git
+.claude
+mockup-images
