@@ -494,25 +494,92 @@ h1{margin:6px 0 2px; font-size:1.5em; letter-spacing:1px;}
 
 /* ---------- Phone layout: everything was scaling down correctly but leaving a lot
    of a narrow screen's width and height unused. This pass claims more of both —
-   bigger cards, tighter gaps — rather than just shrinking the desktop layout. ---------- */
+   bigger cards, tighter gaps — rather than just shrinking the desktop layout.
+   Sized up further after real-device feedback: without a <meta viewport> tag (now
+   fixed, see every *.html <head>) none of this was even reaching a real phone, which
+   read as "everything's too small" — now that it actually applies, pushed sizes up
+   further still, and the log capped much shorter, so it can't crowd out the table. ---------- */
 @media (max-width:480px){
-  #app{ gap:10px; }
-  .table-area{ min-height:0; gap:6px; }
+  body{ padding:8px; }
+  #app{ gap:8px; }
+  .table-area{ min-height:0; gap:4px; }
   .center-circle{ width:min(62vw,320px); }
 
-  /* two mini-cards per seat + the center stat card all share one row, so on a
-     narrow phone the mini-cards specifically need to shrink below their desktop
-     size (57px) to leave the stat card room — verified against actual viewport
-     width, not just eyeballed */
-  .mini-card{ width:13vw; height:auto; }
-  .seat-cards{ gap:5px; }
-  .hole-cards{ gap:8px; }
+  .round-label{ font-size:.85em; }
+  .pot-amount{ font-size:clamp(2.1rem,7vw,2.5rem); }
 
-  .btn{ font-size:.85em; padding:12px 6px; }
-  .raise-slider::-webkit-slider-thumb{ width:34px; height:34px; }
-  .raise-slider::-moz-range-thumb{ width:34px; height:34px; }
+  /* two mini-cards per seat + the center stat card all share one row — the stat
+     card's own share is pulled in a bit further here specifically to leave more room
+     for bigger flanking cards, verified against actual viewport width at 320-480px,
+     not just eyeballed. */
+  .stat-card{ width:min(24vw,132px); }
+  .mini-card{ width:17vw; height:auto; }
+  .seat-cards{ gap:4px; }
+  .seat-name{ font-size:1em; }
+  .seat-chips{ font-size:.95em; }
+
+  .hole-cards{ gap:8px; }
+  .player-card .pname{ font-size:1.05em; }
+  .you-name{ font-size:1.1em; }
+  .you-chips{ font-size:1em; }
+
+  .btn{ font-size:1.05em; padding:16px 6px; }
+  .raise-slider{ height:18px; }
+  .raise-slider::-webkit-slider-thumb{ width:40px; height:40px; }
+  .raise-slider::-moz-range-thumb{ width:40px; height:40px; }
 
   #round-reveal, #game-over{ padding:12px; }
-  .seat-stat-pop{ font-size:.78em; padding:2px 8px; }
-  .log-strip{ max-height:110px; overflow-y:auto; }
+  #round-reveal h3, #game-over h2{ font-size:1.1em; }
+  .seat-stat-pop{ font-size:.85em; padding:3px 9px; }
+
+  /* Was 110px — tall enough on a real phone (no viewport tag meant this rule never
+     even applied before) to crowd out the table entirely. Short enough now to stay
+     out of the way; the scrollbar is still there for anyone who wants the history. */
+  .log-strip{ max-height:56px; overflow-y:auto; }
+}
+
+/* ---------- Landscape phones: height is the scarce resource here (often
+   320-450px), not width — none of the rules above help, since they only ever shrink
+   things by *width*. Without this, a sideways phone shows the top of the page with the
+   actual Fold/Check/Raise buttons pushed entirely below the fold and no visual hint
+   that they exist — found by measuring a 667x375 viewport, where the fold button's
+   top (380px) was already past the bottom of the screen (375px). Cards size off vh
+   instead of vw here, and the header is dropped entirely to reclaim its space — a
+   sideways phone is for playing, not for reading the tagline again. ---------- */
+@media (orientation:landscape) and (max-height:500px){
+  body{ padding:6px 16px; }
+  h1, .subtitle{ display:none; }
+  #app{ gap:6px; }
+
+  .table-area{ min-height:0; gap:6px; }
+  .center-circle{ width:min(30vh,220px); }
+  .pot-amount{ font-size:1.3rem; }
+
+  /* width:auto lets aspect-ratio compute width from the new height instead of keeping
+     the desktop width alongside a mismatched height (the two together would otherwise
+     override aspect-ratio entirely, since both dimensions were already pinned). */
+  .mini-card{ width:auto; height:11vh; }
+  .seat-cards{ gap:4px; }
+  .seat-name{ font-size:.8em; }
+  .seat-chips{ font-size:.75em; }
+
+  .stat-card{ width:auto; height:16vh; padding:8px 6px 6px; }
+  .stat-card .label{ font-size:.75em; }
+  .stat-card .icon{ font-size:1.3em; margin-bottom:0; }
+
+  .you-seat{ gap:4px; }
+  .player-card{ width:auto; height:14vh; padding:8px 6px 6px; }
+  .player-card .pname{ font-size:.8em; }
+  .hole-cards{ gap:6px; }
+  .you-header{ gap:6px; }
+
+  .controls{ gap:4px; }
+  .btn{ padding:8px 6px; font-size:.8em; }
+  .action-timer{ height:4px; }
+
+  #round-reveal, #game-over{ padding:8px; }
+  #round-reveal h3, #game-over h2{ margin:0 0 4px; font-size:.95em; }
+  .seat-stat-pop{ font-size:.7em; padding:2px 6px; }
+
+  .log-strip{ max-height:38px; overflow-y:auto; }
 }
