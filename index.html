@@ -4,12 +4,55 @@
 <meta charset="UTF-8">
 <title>NBA Stat Poker</title>
 <link rel="stylesheet" href="css/style.css">
+<style>
+  .home-wrap{
+    width:100%; min-height:100vh; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:22px; padding:16px;
+  }
+  .home-title{ margin:0; text-align:center; }
+  .home-subtitle{ max-width:420px; }
+  .mode-row{
+    width:100%; max-width:640px;
+    display:flex; gap:16px; flex-wrap:wrap; justify-content:center;
+  }
+  /* Each mode is its own "playing card" (same paper/ink/gold framing as the hole
+     cards and stat card in-game) rather than a plain button — picking a mode reads
+     as picking a card, which is the one visual idea this whole app is built around. */
+  .mode-card{
+    flex:1 1 220px; max-width:260px;
+    padding:22px 16px;
+    text-decoration:none;
+    display:flex; flex-direction:column; align-items:center; gap:8px;
+    transition:transform .12s ease, box-shadow .12s ease;
+  }
+  .mode-card:hover{ transform:translateY(-3px); }
+  .mode-card:focus-visible{ outline:2px solid var(--gold); outline-offset:3px; }
+  .mode-icon{ font-size:2.4em; }
+  .mode-label{
+    font-family:var(--font-display); font-stretch:condensed; font-weight:800;
+    letter-spacing:.03em; text-transform:uppercase; font-size:1.1em;
+  }
+  .mode-desc{ font-size:.8em; opacity:.75; line-height:1.4; }
+</style>
 </head>
 <body>
-<h1>🏀 NBA Stat Poker</h1>
-<div class="subtitle">Poker-style betting, NBA legends as your hole cards, one community stat card up for grabs each round.</div>
-<div id="app"></div>
-
-<script type="module" src="js/main.js"></script>
+<div class="home-wrap">
+  <div>
+    <h1 class="home-title">🏀 NBA Stat Poker</h1>
+    <div class="subtitle home-subtitle">Poker-style betting, NBA legends as your hole cards, one community stat card up for grabs each round.</div>
+  </div>
+  <div class="mode-row">
+    <a class="id-card mode-card" href="solo.html">
+      <span class="mode-icon">🤖</span>
+      <span class="mode-label">Play Bots</span>
+      <span class="mode-desc">Jump straight into a solo match against CPU opponents — no account needed.</span>
+    </a>
+    <a class="id-card mode-card" href="lobby/lobby.html">
+      <span class="mode-icon">🌐</span>
+      <span class="mode-label">Play Online</span>
+      <span class="mode-desc">Real-time matches against other players. Sign in or create an account to join.</span>
+    </a>
+  </div>
+</div>
 </body>
 </html>

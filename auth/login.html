@@ -7,8 +7,11 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   .auth-wrap{
-    width:100%; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    width:100%; min-height:100vh; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:10px;
   }
+  .home-link{ color:var(--muted); font-size:.8em; text-decoration:none; }
+  .home-link:hover{ color:var(--text); }
   .auth-card{
     width:min(90vw, 340px);
     padding:28px 26px 26px;
@@ -51,6 +54,7 @@
 </head>
 <body>
 <div class="auth-wrap">
+  <a class="home-link" href="../index.html">← Home</a>
   <div id="app"></div>
 </div>
 <script type="module" src="login.js"></script>
