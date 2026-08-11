@@ -127,6 +127,14 @@ h1{margin:6px 0 2px; font-size:1.5em; letter-spacing:1px;}
 /* ---------- Opponent seats: two face-down cards, chip count, community-card tally ---------- */
 .seat{ position:relative; display:flex; flex-direction:column; align-items:center; gap:6px; }
 .seat-cards{ display:flex; gap:8px; }
+/* Wraps a seat's cards (face-down mini-cards, or the human's own face-up hole-cards)
+   together with the round-reveal stat badge so the badge sits beside the cards — to
+   their right — instead of stacked underneath the name/chips like the rest of the seat's
+   info. */
+/* wrap+center as a fallback for narrow phone widths where a CPU seat's column is too
+   tight for cards-plus-badge side by side — the badge drops below the cards there
+   instead of clipping or overflowing the table area. */
+.seat-cards-row{ display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:8px; }
 .seat-name{ font-size:.9em; font-weight:700; color:var(--text); }
 .seat-chips{
   font-family:var(--font-display); font-stretch:condensed;
@@ -166,6 +174,35 @@ h1{margin:6px 0 2px; font-size:1.5em; letter-spacing:1px;}
   0%{ opacity:0; transform:translate(-50%,4px) scale(.6); }
   30%{ opacity:1; transform:translate(-50%,-4px) scale(1.15); }
   100%{ opacity:0; transform:translate(-50%,-16px) scale(1); }
+}
+
+/* The floating "CALL $X" / "RAISE $X" label — a document.body-attached element (see
+   popBetAmount in ui.js), positioned via fixed left/top set from the seat's own
+   getBoundingClientRect at creation time, same technique as .chip-fly. Held longer than
+   the chip flight itself since a dollar figure needs a beat to actually read, not just
+   register as motion. Raise gets a distinct color, not just a bigger number, so the two
+   are never confused at a glance. */
+.bet-amount-pop{
+  position:fixed; z-index:55; pointer-events:none;
+  font-family:var(--font-display); font-stretch:condensed; font-weight:800;
+  font-size:.72em; letter-spacing:.03em; white-space:nowrap;
+  padding:3px 9px; border-radius:8px;
+  background:rgba(0,0,0,.6); color:var(--gold);
+  border:1px solid rgba(232,193,92,.55);
+  animation:betAmountPop 900ms ease forwards;
+}
+.bet-amount-pop.raise{
+  color:#e9fbee; background:rgba(47,125,79,.9); border-color:rgba(87,181,122,.75);
+}
+/* Percentage translates here are relative to the label's own box, not the viewport, so
+   they read as "drift upward by about its own height" regardless of where left/top
+   anchored it — the anchor itself sits at the seat's chip-amount, top edge. */
+@keyframes betAmountPop{
+  0%{ opacity:0; transform:translate(-50%,-70%) scale(.85); }
+  15%{ opacity:1; transform:translate(-50%,-100%) scale(1.05); }
+  25%{ transform:translate(-50%,-105%) scale(1); }
+  75%{ opacity:1; transform:translate(-50%,-120%) scale(1); }
+  100%{ opacity:0; transform:translate(-50%,-150%) scale(.95); }
 }
 
 .cards-tally{ font-size:.78em; letter-spacing:1px; min-height:1em; }
@@ -238,7 +275,7 @@ h1{margin:6px 0 2px; font-size:1.5em; letter-spacing:1px;}
   0%{ opacity:1; filter:grayscale(0%); transform:scale(1); }
   100%{ opacity:.4; filter:grayscale(70%); transform:scale(.96); }
 }
-.you-header{ display:flex; align-items:center; gap:8px; }
+.you-header{ display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap; }
 .you-name{ font-weight:700; font-size:1em; }
 .you-chips{
   font-family:var(--font-display); font-stretch:condensed;
@@ -259,6 +296,27 @@ h1{margin:6px 0 2px; font-size:1.5em; letter-spacing:1px;}
   display:flex; flex-direction:column; gap:8px;
 }
 .status-line{ text-align:center; font-size:.9em; color:var(--muted); min-height:1.2em; }
+
+/* Action clock: counts down the same ACTION_TIMEOUT_MS betting.js actually enforces
+   (passed in via the --action-timeout custom property so the two can't drift apart).
+   Pure CSS — a fresh element every render, so the animation always restarts clean at
+   full width for a newly-acted-upon turn and never needs JS to drive it frame by frame. */
+.action-timer{
+  width:100%; height:5px; border-radius:3px;
+  background:rgba(255,255,255,.12); overflow:hidden;
+}
+.action-timer-bar{
+  height:100%; width:100%; transform-origin:left;
+  background-color:var(--gold);
+  animation:actionTimerDrain var(--action-timeout) linear forwards;
+}
+@keyframes actionTimerDrain{
+  /* background-color (a solid, not a gradient) is what actually interpolates smoothly
+     between keyframes — a gradient-to-gradient animation here would just hard-cut. */
+  0%{ transform:scaleX(1); background-color:var(--gold); }
+  70%{ background-color:var(--gold); }
+  100%{ transform:scaleX(0); background-color:#c1584c; }
+}
 .actions{ display:flex; gap:8px; }
 .btn{
   flex:1;
@@ -341,26 +399,77 @@ h1{margin:6px 0 2px; font-size:1.5em; letter-spacing:1px;}
   border:2px solid var(--ink);
   box-shadow:0 3px 6px rgba(0,0,0,.4);
   pointer-events:none; z-index:50;
-  transition:transform .55s cubic-bezier(.3,.6,.3,1), opacity .55s ease .25s;
+  /* Kept in step with CHIP_FLY_MS in ui.js (.5s) — the opacity fade's .18s head start
+     plus its own .5s run is why flyChip's cleanup waits CHIP_FLY_MS + 180ms before
+     actually removing the element, so it's never yanked out mid-fade. */
+  transition:transform .5s cubic-bezier(.3,.6,.3,1), opacity .5s ease .18s;
 }
 
 /* ---------- Round result / game over ---------- */
-#round-result, #game-over{
+#round-reveal, #game-over{
   width:100%;
   background:rgba(0,0,0,.4);
   border:1.5px solid rgba(232,193,92,.4);
   border-radius:16px;
   padding:16px;
 }
-#round-result h3, #game-over h2{ text-align:center; margin:0 0 10px; }
-#round-result p, #game-over p{ text-align:center; margin:8px 0; }
-table.breakdown{width:100%; border-collapse:collapse; font-size:.85em; margin-top:6px;}
-table.breakdown th, table.breakdown td{
-  border:1px solid rgba(255,255,255,.15); padding:8px; text-align:center;
+#round-reveal h3, #game-over h2{ text-align:center; margin:0 0 10px; }
+#round-reveal p, #game-over p{ text-align:center; margin:8px 0; }
+.reveal-note{ color:var(--muted); font-size:.85em; }
+
+/* Round reveal, beat one: each active player's combined stat for the just-revealed
+   category pops in *on their own seat* — comparing them means looking at the two seats
+   and the value each just grew, not looking away to a separate list and matching names
+   back up. Holds until REVEAL_HOLD_MS has passed, then fades on its own cue (the
+   `.fading` toggle in ui.js) right as the card starts flying to the winner. */
+.seat-stat-pop{
+  font-family:var(--font-display); font-stretch:condensed; font-weight:800;
+  font-size:.85em; letter-spacing:.02em;
+  padding:3px 11px; border-radius:8px;
+  background:rgba(0,0,0,.4); color:var(--text);
+  border:1.5px solid rgba(255,255,255,.18);
   font-variant-numeric:tabular-nums;
+  /* Resting opacity is 1 here (not held by the entrance animation below, which
+     deliberately omits `forwards`) so the later .fading class has a plain, transitionable
+     value to animate away from — a forwards-filled animation keeps outranking a
+     transition on the same property even after it "finishes", which would otherwise
+     make the fade-out silently never play. */
+  opacity:1;
+  animation:statPopIn .35s ease;
+  transition:opacity .3s ease;
 }
-table.breakdown th{background:rgba(255,255,255,.06); font-weight:700;}
-.winner-cell{background:rgba(232,193,92,.3); font-weight:700; box-shadow:inset 0 0 0 2px var(--gold);}
+.seat-stat-pop.winner{
+  color:var(--gold); border-color:var(--gold); box-shadow:0 0 12px rgba(232,193,92,.45);
+}
+/* Your own private "here's what you had" after folding — never a real contender (you
+   forfeited the round regardless of the number), so this is deliberately muted rather
+   than styled like a live result: dashed border, dimmer text, no glow either way. */
+.seat-stat-pop.folded-stat{
+  opacity:.7; color:var(--muted); border-style:dashed; border-color:rgba(255,255,255,.3);
+}
+.seat-stat-pop.fading{ opacity:0; }
+@keyframes statPopIn{
+  0%{ opacity:0; transform:translateY(6px) scale(.9); }
+  100%{ opacity:1; transform:translateY(0) scale(1); }
+}
+
+/* Round reveal, beat two: a clone of the center stat card flies from there to whoever
+   won it (one clone per winner, on a tie) — same fixed-position-clone-plus-transform
+   technique as .chip-fly above, just with a per-seat destination computed in JS instead
+   of a single fixed pot target. */
+.stat-card-fly{
+  position:fixed; z-index:60; pointer-events:none;
+  margin:0; /* .id-card's flex layout doesn't set margin, but be explicit since this is cloned out of normal flow */
+  transition:transform .55s cubic-bezier(.3,.6,.3,1), opacity .55s ease .2s;
+}
+/* The landing hit: whichever seat's tally the flying card just reached gets a quick
+   pulse so the new card actually reads as having arrived there. */
+.cards-tally.just-won{ animation:tallyBump .5s ease; }
+@keyframes tallyBump{
+  0%{ transform:scale(1); }
+  40%{ transform:scale(1.6); }
+  100%{ transform:scale(1); }
+}
 
 /* ---------- Log strip ---------- */
 .log-strip{
@@ -403,7 +512,7 @@ table.breakdown th{background:rgba(255,255,255,.06); font-weight:700;}
   .raise-slider::-webkit-slider-thumb{ width:34px; height:34px; }
   .raise-slider::-moz-range-thumb{ width:34px; height:34px; }
 
-  #round-result, #game-over{ padding:12px; }
-  table.breakdown{ font-size:.75em; }
+  #round-reveal, #game-over{ padding:12px; }
+  .seat-stat-pop{ font-size:.78em; padding:2px 8px; }
   .log-strip{ max-height:110px; overflow-y:auto; }
 }

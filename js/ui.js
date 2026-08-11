@@ -4,8 +4,8 @@
 // nothing here leaks the other direction. That keeps the door open to swapping this
 // file out for a different client (or a thin multiplayer client) without touching engine.js.
 
-import { ANTE, ROUNDS, makeGame, activePlayers } from './state.js';
-import { currentMaxBet } from './betting.js';
+import { ANTE, MIN_RAISE, ROUNDS, makeGame } from './state.js';
+import { currentMaxBet, ACTION_TIMEOUT_MS, timeoutAction } from './betting.js';
 import { playGame, nextRound as engineNextRound } from './engine.js';
 import { CATS } from './data.js';
 
@@ -31,6 +31,51 @@ function fmtStat(key, value){
 /** @type {{G: import('./state.js').GameState|null, resolveHuman: ((result: import('./state.js').BettingAction) => void)|null}} */
 const state = { G: null, resolveHuman: null };
 
+// How long the round-reveal animation holds on each player's combined stat before the
+// card flies to the winner, and how long that flight itself takes. Both the solo
+// auto-advance timer below and the animation sequencing in renderGame() are driven off
+// these same two numbers so they can never drift out of sync with each other.
+const REVEAL_HOLD_MS = 5000;
+const CARD_FLY_MS = 650;
+
+// A single chip's travel time (matches the .chip-fly transition duration in CSS — kept
+// here too since flyChip's cleanup setTimeout needs to know when the animation is
+// actually done). A raise fires two chips STAGGER_MS apart rather than nearly at once —
+// that gap is what actually reads as "more chips going in" instead of a call with an
+// extra chip blurred on top of it.
+const CHIP_FLY_MS = 500;
+const RAISE_CHIP_STAGGER_MS = 220;
+// How long the floating "CALL $X"/"RAISE $X" label stays up — matches .bet-amount-pop's
+// own animation duration in CSS.
+const BET_POP_MS = 900;
+
+// There used to be a "Next Round" button the human clicked once they'd read the round
+// result. Now that round-result is a timed animation instead of a static popup, solo
+// play needs to drive itself forward the same way the multiplayer server already does
+// for everyone else (see NEXT_ROUND_DELAY_MS in server/game-rooms.js) — this timer is
+// solo's equivalent. Lives here (not in renderGame) because renderGame is also called
+// directly by the multiplayer client, which must never self-advance a server-authoritative
+// match.
+/** @type {ReturnType<typeof setTimeout>|null} */
+let advanceTimer = null;
+
+// Tracks which round-result the animation has already played for, so a re-render that
+// doesn't represent a *new* round outcome (there shouldn't be one, but better safe)
+// never restarts the reveal from scratch. Keyed by round number + category rather than
+// object identity, since a multiplayer GameState is JSON off the wire — a fresh object
+// every broadcast even when nothing actually changed.
+/** @type {string|null} */
+let lastRevealedResultKey = null;
+
+// Tracks which round-result's winnings have actually "landed" — set inside
+// flyStatCardToWinners's own landing timeout, the moment the flying card reaches the
+// winner. Until then, renderGame() deliberately displays a winner's *pre-round* chips
+// and tally (see displayChips/displayTallyIcons below) even though G.players itself was
+// already updated back when resolveRound() ran — so a stray re-render mid-reveal (e.g.
+// multiplayer's reconnect resync) can't let the real numbers leak out early.
+/** @type {string|null} */
+let landedResultKey = null;
+
 /**
  * @param {'fold'|'call'|'raise'} action
  * @param {number} [amount]
@@ -44,10 +89,24 @@ export function humanAction(action, amount){
 
 // The client's requestAction: there's only ever one non-AI seat (seat 0, "You"), and
 // "waiting for the human" just means holding onto this Promise's resolver until a
-// button click calls humanAction() above.
+// button click calls humanAction() above — or, if ACTION_TIMEOUT_MS passes first, until
+// this timeout resolves it itself. The `state.resolveHuman === res` check is what makes
+// a late click harmless once that's happened: humanAction() reads state.resolveHuman
+// fresh at click time, so if the timeout already nulled it out (or a later turn already
+// replaced it with its own resolver), a stale click is a no-op instead of hijacking
+// whatever's currently pending.
 /** @type {import('./state.js').RequestActionFn} */
 function requestAction(seatId){
-  return new Promise(res => { state.resolveHuman = res; });
+  return new Promise(res => {
+    state.resolveHuman = res;
+    setTimeout(()=>{
+      if(state.resolveHuman === res && state.G){
+        state.resolveHuman = null;
+        const p = /** @type {import('./state.js').GamePlayer} */ (state.G.players.find(x=>x.id===seatId));
+        res(timeoutAction(state.G, p));
+      }
+    }, ACTION_TIMEOUT_MS);
+  });
 }
 
 export function renderStart(){
@@ -121,8 +180,16 @@ const PERSON_ICON = `<svg class="id-icon" viewBox="0 0 200 260">
  * @param {boolean} revealHoles
  * @param {'seat-left'|'seat-right'} side
  * @param {boolean} justChecked
+ * @param {number} displayChips What to show for this seat's chip total — may be less
+ *   than p.chips while this round's win hasn't "landed" yet (see landedResultKey).
+ * @param {import('./data.js').Category[]} displayTally Which tally icons to show — may
+ *   omit this round's just-won card for the same reason.
+ * @param {{text:string, isWinner:boolean, folded:boolean}|null} stat This round's
+ *   combined-stat badge, shown right on the seat during the reveal — null outside that
+ *   window. `folded` is only ever true for the human's own private post-fold reveal
+ *   (see humanStat in renderGame) — opponents never get one, folded or not.
  */
-function renderSeat(p, actingId, revealHoles, side, justChecked){
+function renderSeat(p, actingId, revealHoles, side, justChecked, displayChips, displayTally, stat){
   // A player who's busted has their cards removed for the rest of the match — no
   // card-backs to hide behind, just a spectator tag where their chip count used to be.
   const cardsHtml = p.eliminated
@@ -135,13 +202,18 @@ function renderSeat(p, actingId, revealHoles, side, justChecked){
         }).join('')}
       </div>`;
 
+  // The stat badge sits beside the cards (in their own row), not stacked underneath the
+  // name/chips — reads as "here's their hand's number" rather than another line in the
+  // vertical stack of seat info.
+  const statPopHtml = stat ? `<div class="seat-stat-pop ${stat.isWinner?'winner':''}">${stat.text}</div>` : '';
+
   return `
     <div class="seat ${side} ${p.folded?'folded':''} ${p.eliminated?'eliminated':''} ${actingId===p.id?'acting':''} ${justChecked?'just-checked':''}" data-seat="${p.id}">
       ${justChecked ? `<div class="check-tap">✊</div>` : ''}
-      ${cardsHtml}
+      <div class="seat-cards-row">${cardsHtml}${statPopHtml}</div>
       <div class="seat-name">${p.name}</div>
-      ${p.eliminated ? '' : `<div class="seat-chips chip-amount">$${p.chips}${p.allIn?' (all-in)':''}</div>`}
-      <div class="cards-tally">${p.wonCategories.map(c=>c.icon).join('')}</div>
+      ${p.eliminated ? '' : `<div class="seat-chips chip-amount">$${displayChips}${p.allIn?' (all-in)':''}</div>`}
+      <div class="cards-tally">${displayTally.map(c=>c.icon).join('')}</div>
     </div>`;
 }
 
@@ -170,8 +242,87 @@ function flyChip(fromSelector, delay){
       chip.style.transform = `translate(${dx}px,${dy}px) scale(.55)`;
       chip.style.opacity = '0';
     });
-    setTimeout(()=>{ chip.remove(); }, 600);
+    setTimeout(()=>{ chip.remove(); }, CHIP_FLY_MS + 180); // + the opacity fade's own tail, see .chip-fly
   }, delay || 0);
+}
+
+// The floating "CALL $X" / "RAISE $X" label — appended to document.body rather than
+// baked into the seat's own template markup for the same reason flyChip is: the next
+// actor's "your turn" render fires only ~150ms later (see bettingRound's sleep(150) in
+// betting.js) and would wipe out anything embedded in #app's innerHTML long before its
+// own animation actually finished. Living outside #app is what lets this play its full
+// BET_POP_MS instead of getting cut off after a fraction of it.
+/**
+ * @param {string} fromSelector
+ * @param {'call'|'raise'} action
+ * @param {number|undefined} amount
+ */
+function popBetAmount(fromSelector, action, amount){
+  if(amount===undefined) return;
+  const fromEl = document.querySelector(fromSelector);
+  if(!fromEl) return;
+  const rect = fromEl.getBoundingClientRect();
+  const label = document.createElement('div');
+  label.className = `bet-amount-pop ${action}`;
+  label.textContent = `${action==='raise' ? 'RAISE' : 'CALL'} $${amount}`;
+  label.style.left = (rect.left + rect.width/2) + 'px';
+  label.style.top = rect.top + 'px';
+  document.body.appendChild(label);
+  setTimeout(()=>{ label.remove(); }, BET_POP_MS);
+}
+
+// The second half of the round-reveal sequence: clones the center stat card and sends
+// one copy flying to each winner's seat (more than one on a tie), then bumps that
+// seat's card tally once it "lands" — same clone-a-floating-element-and-transform
+// technique as flyChip above, just with a dynamic per-seat destination instead of a
+// single fixed pot target. This is also the moment the winner's chip total and tally
+// icon actually update in the DOM — renderGame() was deliberately showing pre-round
+// values until now (see displayChips/displayTally + landedResultKey), so patching them
+// in here means the win visibly *arrives* with the card instead of already having
+// happened silently five seconds earlier.
+/**
+ * @param {import('./state.js').GameState} G
+ * @param {number[]} winnerIds
+ * @param {string} resultKey
+ */
+function flyStatCardToWinners(G, winnerIds, resultKey){
+  const cardEl = document.querySelector('.center-column .stat-card');
+  if(!cardEl) return;
+  const from = cardEl.getBoundingClientRect();
+  winnerIds.forEach(id=>{
+    const seatEl = document.querySelector(`[data-seat="${id}"]`);
+    const tallyEl = seatEl && seatEl.querySelector('.cards-tally');
+    const chipEl = seatEl && seatEl.querySelector('.chip-amount');
+    if(!seatEl) return;
+    const to = (tallyEl || seatEl).getBoundingClientRect();
+    const clone = /** @type {HTMLElement} */ (cardEl.cloneNode(true));
+    clone.classList.add('stat-card-fly');
+    clone.style.width = from.width + 'px';
+    clone.style.height = from.height + 'px';
+    clone.style.left = from.left + 'px';
+    clone.style.top = from.top + 'px';
+    document.body.appendChild(clone);
+    const dx = (to.left + to.width/2) - (from.left + from.width/2);
+    const dy = (to.top + to.height/2) - (from.top + from.height/2);
+    requestAnimationFrame(()=>{
+      clone.style.transform = `translate(${dx}px,${dy}px) scale(.2)`;
+      clone.style.opacity = '0';
+    });
+    setTimeout(()=>{
+      clone.remove();
+      landedResultKey = resultKey;
+      const player = G.players.find(pl=>pl.id===id);
+      if(player){
+        const allInTag = seatEl.classList.contains('you-seat') ? '' : (player.allIn ? ' (all-in)' : ''); // matches each seat's own pre-existing formatting
+        if(chipEl) chipEl.textContent = `$${player.chips}${allInTag}`;
+        if(tallyEl) tallyEl.innerHTML = player.wonCategories.map(c=>c.icon).join('');
+      }
+      if(tallyEl){
+        tallyEl.classList.add('just-won');
+        setTimeout(()=>tallyEl.classList.remove('just-won'), 500);
+      }
+    }, CARD_FLY_MS);
+  });
 }
 
 // Local single-player wiring: renderGame always needs a GameState + whose seat is
@@ -187,6 +338,18 @@ function flyChip(fromSelector, delay){
 export function render(actingId, lastAction){
   if(!state.G){ renderStart(); return; }
   renderGame(state.G, actingId, lastAction, 0, 'solo');
+
+  // Solo drives its own round-to-round pacing (multiplayer's equivalent lives in
+  // server/game-rooms.js's runGame loop instead). Only (re)armed on the render that
+  // actually entered round-result — every other render this round (betting actions,
+  // etc.) leaves stage something else and this is a no-op.
+  if(state.G.stage==='round-result'){
+    if(advanceTimer) clearTimeout(advanceTimer);
+    advanceTimer = setTimeout(()=>{
+      advanceTimer = null;
+      if(state.G && state.G.stage==='round-result') nextRound();
+    }, REVEAL_HOLD_MS + CARD_FLY_MS + 400);
+  }
 }
 
 // The shared render — used directly by the local single-player wrapper above, and by
@@ -214,8 +377,42 @@ export function renderGame(G, actingId, lastAction, mySeatId, mode){
   const revealHoles = G.stage==='game-over';
   const checkedId = lastAction && lastAction.action==='check' ? lastAction.playerId : null;
 
-  const seatLeft = opponents[0] ? renderSeat(opponents[0], actingId, revealHoles, 'seat-left', checkedId===opponents[0].id) : `<div class="seat-left"></div>`;
-  const seatRight = opponents[1] ? renderSeat(opponents[1], actingId, revealHoles, 'seat-right', checkedId===opponents[1].id) : `<div class="seat-right"></div>`;
+  // While this round's result is showing but hasn't "landed" yet (see landedResultKey's
+  // own comment), a winner's chip total and tally icon are deliberately displayed as
+  // they were *before* this round's payout — the win visibly arrives with the card-fly
+  // animation instead of having already happened silently the instant the round ended.
+  // gameNum is part of the key (not just round+category) so a new game's round 1
+  // revealing the same category its predecessor's round 1 did doesn't get mistaken for
+  // "already handled" and skip both the reveal animation and the payout suppression.
+  const resultKey = G.roundResult ? `${G.gameNum}:${G.round}:${G.roundResult.category.key}` : null;
+  const isPendingReveal = resultKey!==null && (G.stage==='round-result' || G.stage==='game-over') && resultKey!==landedResultKey;
+  /** @param {import('./state.js').GamePlayer} p @returns {number} */
+  const displayChips = p => {
+    if(isPendingReveal && G.roundResult && G.roundResult.winners.includes(p.id)){
+      return p.chips - (G.roundResult.payouts[p.id] || 0);
+    }
+    return p.chips;
+  };
+  /** @param {import('./state.js').GamePlayer} p @returns {import('./data.js').Category[]} */
+  const displayTally = p => {
+    if(isPendingReveal && G.roundResult && G.roundResult.winners.includes(p.id)){
+      return p.wonCategories.slice(0, -1);
+    }
+    return p.wonCategories;
+  };
+  // The round-reveal's combined-stat badge, shown right on each player's own seat
+  // (rather than in one separate list you have to match names against) for as long as
+  // the result is up — fades out on its own cue once the card starts its flight, same
+  // moment displayChips/displayTally above start telling the truth.
+  /** @param {import('./state.js').GamePlayer} p @returns {{text:string, isWinner:boolean, folded:boolean}|null} */
+  const statFor = p => {
+    const rr = G.roundResult;
+    if(!rr || !(G.stage==='round-result' || G.stage==='game-over') || !(p.id in rr.values)) return null;
+    return {text: fmtStat(rr.category.key, rr.values[p.id]), isWinner: rr.winners.includes(p.id), folded: false};
+  };
+
+  const seatLeft = opponents[0] ? renderSeat(opponents[0], actingId, revealHoles, 'seat-left', checkedId===opponents[0].id, displayChips(opponents[0]), displayTally(opponents[0]), statFor(opponents[0])) : `<div class="seat-left"></div>`;
+  const seatRight = opponents[1] ? renderSeat(opponents[1], actingId, revealHoles, 'seat-right', checkedId===opponents[1].id, displayChips(opponents[1]), displayTally(opponents[1]), statFor(opponents[1])) : `<div class="seat-right"></div>`;
 
   const currentCat = G.revealedCats[0];
   const statCardHtml = currentCat
@@ -247,48 +444,66 @@ export function renderGame(G, actingId, lastAction, mySeatId, mode){
   const need = human.folded ? 0 : maxBet - human.roundBet;
   const callAmount = Math.min(need, human.chips); // what Call would actually cost, clamped to an all-in
   const humanTurn = actingId===mySeatId && !human.folded && G.stage==='betting';
+  // If you folded this round, statFor(human) comes back null — scoreCategories never
+  // ran on you, so you're not in rr.values and there's no verdict to show. You can
+  // still privately see what your own hand would have scored, though: your own hole
+  // cards are never redacted from your own view (see viewFor in state.js), so this is
+  // computed straight from them client-side rather than added to G.roundResult — it
+  // never becomes part of the shared game state, so nobody else's client ever sees it,
+  // only yours.
+  const humanStat = statFor(human) || (() => {
+    const rr = G.roundResult;
+    // G.roundResult isn't cleared by startRound() — it's only ever overwritten when
+    // resolveRound() runs again, so during the *current* round's own betting phase it's
+    // still holding the *previous* round's result. Without this stage check, folding
+    // early in a round would show last round's category/value for a beat before this
+    // round even resolves — gate on the same reveal window statFor() uses.
+    if(!rr || !(G.stage==='round-result' || G.stage==='game-over') || !human.folded || human.hole.length!==2) return null;
+    const key = /** @type {keyof import('./data.js').NBAPlayer} */ (rr.category.key);
+    const value = /** @type {number} */(human.hole[0][key]) + /** @type {number} */(human.hole[1][key]);
+    return {text: fmtStat(rr.category.key, value), isWinner: false, folded: true};
+  })();
 
-  const minRaiseTo = maxBet+20;
+  const minRaiseTo = maxBet+MIN_RAISE;
   const maxRaiseTo = human.chips+human.roundBet;
   // If a player's stack can't cover even the minimum legal raise, don't offer one —
   // a slider whose min exceeds its max just freezes, undraggable, which is exactly
   // the "raise slider doesn't work" bug this replaces.
   const canRaise = maxRaiseTo >= minRaiseTo;
-  const raiseDefault = Math.min(minRaiseTo+20, maxRaiseTo);
+  const raiseDefault = Math.min(minRaiseTo+MIN_RAISE, maxRaiseTo);
 
   let controlsHtml = '';
   if(G.stage==='betting'){
+    // The bar's own countdown is driven entirely by CSS (a full-width-to-empty
+    // transition timed to ACTION_TIMEOUT_MS via the inline custom property below) — it's
+    // purely a visual echo of the actual clock enforced in requestAction() above; if the
+    // human acts first, this element just gets torn down with the rest of .controls on
+    // the next render, same as everything else here.
     controlsHtml = humanTurn ? `
       <div class="controls">
+        <div class="action-timer" style="--action-timeout:${ACTION_TIMEOUT_MS}ms"><div class="action-timer-bar"></div></div>
         <div class="actions">
           <button class="btn btn-fold" onclick="humanAction('fold')">Fold</button>
           <button class="btn btn-call" onclick="humanAction('call')">${callAmount>0? 'Call $'+callAmount : 'Check'}</button>
           ${canRaise ? `<button class="btn btn-raise" id="raiseBtn" onclick="doRaise()">Raise ${raiseDefault}</button>` : ''}
         </div>
-        ${canRaise ? `<input type="range" class="raise-slider" id="raiseSlider" min="${minRaiseTo}" max="${maxRaiseTo}" step="10" value="${raiseDefault}" oninput="updateRaiseLabel(this.value)">` : ''}
+        ${canRaise ? `<input type="range" class="raise-slider" id="raiseSlider" min="${minRaiseTo}" max="${maxRaiseTo}" step="1" value="${raiseDefault}" oninput="updateRaiseLabel(this.value)">` : ''}
       </div>` : `<div class="controls"><div class="status-line">${human.eliminated ? "You're out — watching the rest of the match." : 'Waiting on other players…'}</div></div>`;
   }
 
+  // Replaces the old static "here's who won, click Next Round" popup: this is now just
+  // a category header — the actual per-player numbers live on each seat itself (see
+  // statFor/.seat-stat-pop above), so comparing them doesn't mean looking away from the
+  // table to a separate list and matching names back up. Holds for REVEAL_HOLD_MS, then
+  // (see the resultKey block below, once this HTML is actually in the DOM) the stat card
+  // flies to the winner's seat and — for solo — the match advances itself. No button,
+  // nothing to click.
   let roundResultHtml = '';
   if((G.stage==='round-result' || G.stage==='game-over') && G.roundResult){
     const rr = G.roundResult;
-    const winnerNames = rr.winners.map(id=>/** @type {import('./state.js').GamePlayer} */(G.players.find(p=>p.id===id)).name).join(' & ');
-    const active = activePlayers(G);
-    roundResultHtml = `<div id="round-result">
+    roundResultHtml = `<div id="round-reveal">
       <h3>${rr.category.icon} ${rr.category.label} — Round ${G.round}/${ROUNDS}</h3>
-      ${rr.uncontested ? `<p>${winnerNames} won the card uncontested.</p>` : `
-        <table class="breakdown"><thead><tr><th>Player</th>${active.map(p=>`<th>${p.name}</th>`).join('')}</tr></thead>
-        <tbody><tr><td>${rr.category.icon} ${rr.category.label}</td>${active.map(p=>{
-          const val = /** @type {Object<number,number>} */(rr.values)[p.id];
-          return `<td class="${rr.winners.includes(p.id)?'winner-cell':''}">${fmtStat(rr.category.key, val)}</td>`;
-        }).join('')}</tr></tbody></table>
-        <p><b>${winnerNames} won the card!</b> (+1 🃏 each)</p>
-      `}
-      ${G.stage==='round-result'
-        ? (mode==='solo'
-            ? `<button class="btn-next" onclick="nextRound()">Next Round</button>`
-            : `<p class="status-line">Next round starting…</p>`)
-        : ''}
+      ${rr.uncontested ? `<p class="reveal-note">Uncontested — everyone else folded.</p>` : ''}
     </div>`;
   }
 
@@ -298,7 +513,7 @@ export function renderGame(G, actingId, lastAction, mySeatId, mode){
     const winnerNames = gr.winners.map(id=>/** @type {import('./state.js').GamePlayer} */(G.players.find(p=>p.id===id)).name).join(' & ');
     gameOverHtml = `<div id="game-over">
       <h2>🏆 Game Over</h2>
-      <p>${G.players.map(p=>`${p.name}: ${p.wonCategories.map(c=>c.icon).join('') || '—'}`).join(' &nbsp;|&nbsp; ')}</p>
+      <p>${G.players.map(p=>`${p.name}: ${displayTally(p).map(c=>c.icon).join('') || '—'}`).join(' &nbsp;|&nbsp; ')}</p>
       <p><b>${winnerNames} win${gr.winners.length===1?'s':''} the match!</b></p>
       ${mode==='solo'
         ? `<button class="btn-next" onclick="renderStart()">New Game</button>`
@@ -329,11 +544,14 @@ export function renderGame(G, actingId, lastAction, mySeatId, mode){
       ${checkedId===mySeatId ? `<div class="check-tap">✊</div>` : ''}
       ${human.eliminated
         ? `<div class="spectator-tag">Spectator</div>`
-        : `<div class="hole-cards ${lastAction && lastAction.playerId===mySeatId && lastAction.action==='fold' ? 'just-folded' : ''}">${holeHtml}</div>`}
+        : `<div class="seat-cards-row">
+            <div class="hole-cards ${lastAction && lastAction.playerId===mySeatId && lastAction.action==='fold' ? 'just-folded' : ''}">${holeHtml}</div>
+            ${humanStat ? `<div class="seat-stat-pop ${humanStat.isWinner?'winner':''} ${humanStat.folded?'folded-stat':''}">${humanStat.text}</div>` : ''}
+          </div>`}
       <div class="you-header">
         <div class="you-name">You${human.eliminated?' (spectator)':human.folded?' (folded)':''}</div>
-        <div class="cards-tally">${human.wonCategories.map(c=>c.icon).join('')}</div>
-        <div class="you-chips chip-amount">$${human.chips}</div>
+        <div class="cards-tally">${displayTally(human).map(c=>c.icon).join('')}</div>
+        <div class="you-chips chip-amount">$${displayChips(human)}</div>
       </div>
     </div>
 
@@ -347,9 +565,28 @@ export function renderGame(G, actingId, lastAction, mySeatId, mode){
     const seatSelector = `[data-seat="${lastAction.playerId}"] .chip-amount`;
     if(lastAction.action==='call'){
       flyChip(seatSelector);
+      popBetAmount(seatSelector, 'call', lastAction.amount);
     } else if(lastAction.action==='raise'){
       flyChip(seatSelector);
-      flyChip(seatSelector, 140);
+      flyChip(seatSelector, RAISE_CHIP_STAGGER_MS);
+      popBetAmount(seatSelector, 'raise', lastAction.amount);
+    }
+  }
+
+  // Kick off the round-reveal's second beat — the stat card flying to the winner —
+  // once the first beat (each seat's own .seat-stat-pop, holding for REVEAL_HOLD_MS) has
+  // had its moment. Keyed by round+category rather than run unconditionally on every
+  // render, so a render that re-displays the *same* still-open round result (nothing
+  // else re-renders during this window in practice, but the guard costs nothing) never
+  // restarts or double-plays the flight.
+  if(G.roundResult && resultKey && (G.stage==='round-result' || G.stage==='game-over')){
+    if(resultKey !== lastRevealedResultKey){
+      lastRevealedResultKey = resultKey;
+      const winners = G.roundResult.winners;
+      setTimeout(()=>{
+        document.querySelectorAll('.seat-stat-pop').forEach(el=>el.classList.add('fading'));
+        flyStatCardToWinners(G, winners, resultKey);
+      }, REVEAL_HOLD_MS);
     }
   }
 }
