@@ -56,9 +56,24 @@ app.get('/api/config', (req, res) => {
   res.json({ googleClientId: process.env.GOOGLE_CLIENT_ID || null });
 });
 
-// Everything else (index.html, css/, js/, auth/login.html, ...) is the existing
-// static site, served as-is — the game itself is untouched by this phase.
-app.use(express.static(projectRoot));
+// The client's static assets — served individually by exact directory/file rather than
+// `express.static(projectRoot)` for the whole repo. That blanket form used to also serve
+// every *other* file under the project root over plain HTTP to anyone: server/server.js,
+// server/db.js, server/package.json, Dockerfile, DEPLOY.md, CLAUDE.md, and — critically —
+// server/data/app.db (the live user database, bcrypt hashes and all) and .git/ (Express's
+// static-file dotfile handling did not block it in practice, confirmed by directly
+// requesting /.git/config and /server/data/app.db against a running instance and getting
+// real file content back, not a 404). None of that is meant to leave this process, so
+// only these specific directories — everything an actual page ever references, per every
+// href="…"/src="…" in index.html, solo.html, auth/login.html, and lobby/lobby.html — are
+// mounted, each under its own path.
+for (const dir of ['css', 'js', 'auth', 'lobby']) {
+  app.use(`/${dir}`, express.static(path.join(projectRoot, dir)));
+}
+for (const file of ['index.html', 'solo.html']) {
+  app.get(`/${file}`, (req, res) => res.sendFile(path.join(projectRoot, file)));
+}
+app.get('/', (req, res) => res.sendFile(path.join(projectRoot, 'index.html')));
 
 // An explicit http.Server (rather than app.listen()'s implicit one) is needed so the
 // WebSocket layer can share the exact same port via the 'upgrade' event.
