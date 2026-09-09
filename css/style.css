@@ -511,9 +511,11 @@ h1{margin:6px 0 2px; font-size:1.5em; letter-spacing:1px;}
   /* two mini-cards per seat + the center stat card all share one row — the stat
      card's own share is pulled in a bit further here specifically to leave more room
      for bigger flanking cards, verified against actual viewport width at 320-480px,
-     not just eyeballed. */
-  .stat-card{ width:min(24vw,132px); }
-  .mini-card{ width:17vw; height:auto; }
+     not just eyeballed. All three card sizes below are 20% smaller than that pass
+     landed on, per follow-up feedback that they'd gone too big. */
+  .stat-card{ width:min(19.2vw,106px); }
+  .player-card{ width:min(24vw,106px); }
+  .mini-card{ width:13.6vw; height:auto; }
   .seat-cards{ gap:4px; }
   .seat-name{ font-size:1em; }
   .seat-chips{ font-size:.95em; }
@@ -552,24 +554,34 @@ h1{margin:6px 0 2px; font-size:1.5em; letter-spacing:1px;}
   #app{ gap:6px; }
 
   .table-area{ min-height:0; gap:6px; }
-  .center-circle{ width:min(30vh,220px); }
+  /* Shrunk alongside the cards below it (20%, same as everything else in this block) —
+     left at its old size, this decorative ring (sized off vh, not off table-area's own
+     now-shorter content height) started visibly overlapping the hole-cards row beneath
+     it once the cards themselves got smaller. */
+  .center-circle{ width:min(24vh,176px); }
   .pot-amount{ font-size:1.3rem; }
 
   /* width:auto lets aspect-ratio compute width from the new height instead of keeping
      the desktop width alongside a mismatched height (the two together would otherwise
-     override aspect-ratio entirely, since both dimensions were already pinned). */
-  .mini-card{ width:auto; height:11vh; }
+     override aspect-ratio entirely, since both dimensions were already pinned). Heights
+     are 20% smaller than the original pass, matching the portrait shrink above. */
+  .mini-card{ width:auto; height:8.8vh; }
   .seat-cards{ gap:4px; }
   .seat-name{ font-size:.8em; }
   .seat-chips{ font-size:.75em; }
 
-  .stat-card{ width:auto; height:16vh; padding:8px 6px 6px; }
-  .stat-card .label{ font-size:.75em; }
-  .stat-card .icon{ font-size:1.3em; margin-bottom:0; }
+  /* This card's own content (label + rule + icon) no longer fits the shrunk box at
+     the old padding/spacing — .id-card doesn't clip overflow, so without tightening
+     these too the icon was spilling out past the card's own bottom edge. */
+  .stat-card{ width:auto; height:12.8vh; padding:3px; }
+  .stat-card .label{ font-size:.58em; line-height:1; }
+  .stat-card .icon{ font-size:.85em; margin-top:0; margin-bottom:0; }
+  .card-rule{ margin:2px 0; }
 
   .you-seat{ gap:4px; }
-  .player-card{ width:auto; height:14vh; padding:8px 6px 6px; }
-  .player-card .pname{ font-size:.8em; }
+  .player-card{ width:auto; height:11.2vh; padding:6px 4px 4px; }
+  .player-card .pname{ font-size:.75em; line-height:1.1; }
+  .player-card .id-icon{ width:44%; }
   .hole-cards{ gap:6px; }
   .you-header{ gap:6px; }
 

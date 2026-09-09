@@ -191,8 +191,10 @@ const PERSON_ICON = `<svg class="id-icon" viewBox="0 0 200 260">
  */
 function renderSeat(p, actingId, revealHoles, side, justChecked, displayChips, displayTally, stat){
   // A player who's busted has their cards removed for the rest of the match — no
-  // card-backs to hide behind, just a spectator tag where their chip count used to be.
-  const cardsHtml = p.eliminated
+  // card-backs to hide behind, just a spectator tag where their chip count used to be —
+  // but once the match itself is over (revealHoles), everyone's hand goes face-up same
+  // as everyone else's, spectator or not.
+  const cardsHtml = (p.eliminated && !revealHoles)
     ? `<div class="spectator-tag">Spectator</div>`
     : `<div class="seat-cards">
         ${[0,1].map(i=>{
@@ -432,8 +434,9 @@ export function renderGame(G, actingId, lastAction, mySeatId, mode){
     return `<div class="pip ${done?'done':''} ${now?'now':''}"></div>`;
   }).join('');
 
-  // Busted players have their cards removed for the rest of the match, same as opponents.
-  const holeHtml = human.hole.length && !human.eliminated ? human.hole.map(pl=>`
+  // Busted players have their cards removed for the rest of the match, same as
+  // opponents — except once the match is over, when everyone's hand goes face-up.
+  const holeHtml = human.hole.length && (!human.eliminated || revealHoles) ? human.hole.map(pl=>`
     <div class="id-card player-card">
       ${PERSON_ICON}
       <div class="card-rule"></div>
@@ -542,7 +545,7 @@ export function renderGame(G, actingId, lastAction, mySeatId, mode){
 
     <div class="you-seat ${human.folded?'folded':''} ${human.eliminated?'eliminated':''} ${checkedId===mySeatId?'just-checked':''}" data-seat="${mySeatId}">
       ${checkedId===mySeatId ? `<div class="check-tap">✊</div>` : ''}
-      ${human.eliminated
+      ${(human.eliminated && !revealHoles)
         ? `<div class="spectator-tag">Spectator</div>`
         : `<div class="seat-cards-row">
             <div class="hole-cards ${lastAction && lastAction.playerId===mySeatId && lastAction.action==='fold' ? 'just-folded' : ''}">${holeHtml}</div>
