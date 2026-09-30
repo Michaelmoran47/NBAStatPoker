@@ -11,7 +11,8 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { authRouter } from './auth.js';
 import { attachWebSocketServer } from './ws.js';
-import './db.js'; // creates the DB file + table on first run, as a side effect
+import { db } from './db.js'; // creates the DB file + tables on first run, as a side effect
+import { SqliteSessionStore } from './session-store.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.join(__dirname, '..');
@@ -31,8 +32,12 @@ const app = express();
 
 // Built once and reused for both regular HTTP requests and the WebSocket upgrade
 // below, so a socket's session is always exactly the same session its HTTP requests
-// see — one login, no separate real-time auth step.
+// see — one login, no separate real-time auth step. Uses `SqliteSessionStore` (see
+// session-store.js) instead of express-session's default MemoryStore, which leaks
+// memory and forgets every session on restart — a deploy/container restart would
+// otherwise log everyone out.
 const sessionMiddleware = session({
+  store: new SqliteSessionStore(db),
   secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
@@ -59,7 +64,7 @@ app.get('/api/config', (req, res) => {
 // The client's static assets — served individually by exact directory/file rather than
 // `express.static(projectRoot)` for the whole repo. That blanket form used to also serve
 // every *other* file under the project root over plain HTTP to anyone: server/server.js,
-// server/db.js, server/package.json, Dockerfile, DEPLOY.md, CLAUDE.md, and — critically —
+// server/db.js, server/package.json, Dockerfile, VPS_DEPLOY.md, CLAUDE.md, and — critically —
 // server/data/app.db (the live user database, bcrypt hashes and all) and .git/ (Express's
 // static-file dotfile handling did not block it in practice, confirmed by directly
 // requesting /.git/config and /server/data/app.db against a running instance and getting

@@ -120,6 +120,11 @@ session cookie as regular requests — see `sessionMiddleware` reuse in `server.
 
 - `server/db.js` — opens/creates the SQLite DB (`better-sqlite3`) and its tables
   (`users`, `match_results`) as a side effect of import.
+- `server/session-store.js` — a hand-rolled `express-session` `Store` backed by the same
+  `db` handle from `db.js` (its own `sessions` table), used in `server.js` in place of
+  the default in-memory store, which leaks memory and forgets every session on process
+  restart. Written locally rather than pulled from npm so it stays fully typed via
+  JSDoc like everything else here.
 - `server/auth.js` — `/api/signup`, `/api/login`, `/api/logout`, `/api/me`,
   `/api/auth/google`. Passwords are bcrypt-hashed before storage; Google-only accounts
   have no `password_hash` and are matched by `google_id` instead. Login compares
