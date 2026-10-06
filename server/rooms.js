@@ -25,8 +25,10 @@ import crypto from 'node:crypto';
 /** @type {Map<string, Room>} */
 export const rooms = new Map();
 
-// Matches the single-player game's "you + up to 2 opponents" ceiling for now.
-export const MAX_SEATS = 3;
+// Hard cap on a lobby. Matches can start with fewer (see MIN_SEATS_TO_START).
+export const MAX_SEATS = 6;
+// A guessing match with one player is just a solo run, so starting needs at least two.
+export const MIN_SEATS_TO_START = 2;
 
 /**
  * @param {number} hostUserId
@@ -92,6 +94,31 @@ export function leaveRoom(roomId, userId){
 }
 
 /**
+ * Marks every seat ready. Used when matchmaking has already picked the players, so there's no ready-up step.
+ * @param {string} roomId
+ * @returns {Room}
+ */
+export function readyAll(roomId){
+  const room = rooms.get(roomId);
+  if(!room) throw new Error('That room no longer exists.');
+  for(const seat of room.seats) seat.ready = true;
+  return room;
+}
+
+/**
+ * Starts a room the matchmaking queue picked. Skips startRoom()'s minimum-seat check, because a
+ * bot-filled match can have a single human seat.
+ * @param {string} roomId
+ * @returns {Room}
+ */
+export function startMatchRoom(roomId){
+  const room = rooms.get(roomId);
+  if(!room) throw new Error('That room no longer exists.');
+  room.status = 'started';
+  return room;
+}
+
+/**
  * @param {string} roomId
  * @param {number} userId
  * @returns {Room}
@@ -105,8 +132,7 @@ export function toggleReady(roomId, userId){
   return room;
 }
 
-// Host-only. Requires the room to be full (always exactly MAX_SEATS players — no
-// heads-up 2-player matches) and everyone, including the host, ready.
+// Host-only. Requires at least MIN_SEATS_TO_START players and everyone, including the host, ready.
 /**
  * @param {string} roomId
  * @param {number} userId
@@ -123,7 +149,7 @@ export function startRoom(roomId, userId){
   // the same players. Symptom: what looks like one match somehow anteing well past
   // round 5, because it's actually two interleaved 5-round games.
   if(room.status !== 'waiting') throw new Error('This room has already started.');
-  if(room.seats.length < MAX_SEATS) throw new Error(`Need ${MAX_SEATS} players to start.`);
+  if(room.seats.length < MIN_SEATS_TO_START) throw new Error(`Need at least ${MIN_SEATS_TO_START} players to start.`);
   if(!room.seats.every(s => s.ready)) throw new Error('Not everyone is ready yet.');
   room.status = 'started';
   return room;

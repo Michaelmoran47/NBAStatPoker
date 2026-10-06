@@ -8,8 +8,14 @@ import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import { OAuth2Client } from 'google-auth-library';
 import { db } from './db.js';
+import { START_ELO } from '../js/trivia.js';
+import { createLimiter, limitRoute, userOrIp } from './rate-limit.js';
 
 const SALT_ROUNDS = 12;
+
+// Slow down account creation and password guessing. Keyed by IP, since neither has a user yet.
+const signupLimit = limitRoute(createLimiter({max: 5, windowMs: 60 * 60 * 1000}), userOrIp, 'Too many accounts from this network. Try again later.');
+const loginLimit = limitRoute(createLimiter({max: 20, windowMs: 15 * 60 * 1000}), userOrIp, 'Too many sign-in attempts. Wait a few minutes and try again.');
 const MIN_PASSWORD_LENGTH = 8;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
@@ -21,6 +27,7 @@ const insertUser = db.prepare(
 const insertGoogleUser = db.prepare(
   'INSERT INTO users (username, google_id, email) VALUES (?, ?, ?)'
 );
+const findEloByUserId = db.prepare('SELECT elo FROM users WHERE id = ?');
 const findUserByUsername = db.prepare(
   'SELECT id, username, password_hash FROM users WHERE username = ?'
 );
@@ -33,8 +40,13 @@ const usernameExists = db.prepare(
 
 export const authRouter = Router();
 
-authRouter.post('/signup', async (req, res) => {
-  const { username, password } = req.body ?? {};
+const findInviterByCode = db.prepare('SELECT user_id FROM invite_codes WHERE code = ?');
+const insertAcceptedFriendship = db.prepare(
+  "INSERT OR IGNORE INTO friendships (user_a, user_b, status, requested_by) VALUES (?, ?, 'accepted', ?)"
+);
+
+authRouter.post('/signup', signupLimit, async (req, res) => {
+  const { username, password, invite } = req.body ?? {};
 
   if (typeof username !== 'string' || username.trim().length === 0) {
     return res.status(400).json({ error: 'Username is required.' });
@@ -51,13 +63,25 @@ authRouter.post('/signup', async (req, res) => {
 
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
   const info = insertUser.run(cleanUsername, passwordHash);
+  const newUserId = /** @type {number} */ (info.lastInsertRowid);
 
-  req.session.userId = /** @type {number} */ (info.lastInsertRowid);
+  // A friend's invite link makes the new player friends with the inviter straight away. A bad or old
+  // code is ignored, so it never blocks the sign-up itself.
+  const inviter = typeof invite === 'string'
+    ? /** @type {{user_id:number}|undefined} */ (findInviterByCode.get(invite))
+    : undefined;
+  if (inviter && inviter.user_id !== newUserId) {
+    insertAcceptedFriendship.run(
+      Math.min(newUserId, inviter.user_id), Math.max(newUserId, inviter.user_id), inviter.user_id
+    );
+  }
+
+  req.session.userId = newUserId;
   req.session.username = cleanUsername;
   res.status(201).json({ username: cleanUsername });
 });
 
-authRouter.post('/login', async (req, res) => {
+authRouter.post('/login', loginLimit, async (req, res) => {
   const { username, password } = req.body ?? {};
 
   if (typeof username !== 'string' || typeof password !== 'string') {
@@ -93,7 +117,8 @@ authRouter.get('/me', (req, res) => {
   if (!req.session.username) {
     return res.status(401).json({ error: 'Not logged in.' });
   }
-  res.json({ username: req.session.username });
+  const row = /** @type {{elo:number}|undefined} */ (findEloByUserId.get(req.session.userId));
+  res.json({ username: req.session.username, elo: row?.elo ?? START_ELO });
 });
 
 // The client posts the ID token it got back from Google's "Sign in with Google"

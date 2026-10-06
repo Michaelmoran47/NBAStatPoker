@@ -6,8 +6,16 @@
 // authenticated session, at connection time) — never a client-supplied id.
 
 import { WebSocketServer } from 'ws';
-import { rooms, createRoom, listOpenRooms, joinRoom, leaveRoom, toggleReady, startRoom } from './rooms.js';
-import { startLiveGame, submitAction, markDisconnected, markReconnected, findLiveRoomForUser } from './game-rooms.js';
+import { rooms, createRoom, listOpenRooms, joinRoom, leaveRoom, toggleReady, startRoom, startMatchRoom } from './rooms.js';
+import { enqueue, dequeue, startMatchmaking } from './matchmaking.js';
+import { getRating } from './matches.js';
+import { startLiveGame, submitPlayerGuess, markDisconnected, markReconnected, findLiveRoomForUser, quitSeat } from './game-rooms.js';
+import { makeGuess } from '../js/trivia.js';
+import { createLimiter } from './rate-limit.js';
+
+// Every message a player's socket sends counts against this. Real play needs a handful a round, so this
+// only catches floods.
+const messageLimit = createLimiter({max: 40, windowMs: 10_000});
 
 /** @typedef {import('ws').WebSocket & {userId: number, username: string, roomId: string|null}} Conn */
 
@@ -20,6 +28,7 @@ const connections = new Set();
  *   Express app uses, so a socket's session matches its HTTP session exactly.
  */
 export function attachWebSocketServer(httpServer, sessionMiddleware){
+  startMatchmaking(startRankedMatch);
   const wss = new WebSocketServer({ noServer: true });
 
   httpServer.on('upgrade', (req, socket, head) => {
@@ -53,7 +62,7 @@ export function attachWebSocketServer(httpServer, sessionMiddleware){
     if(live){
       conn.roomId = live.roomId;
       const resynced = markReconnected(live.roomId, live.seatId);
-      if(resynced) send(conn, {type: 'game-state', state: resynced.state, actingId: resynced.actingId});
+      if(resynced) send(conn, {type: 'game-state', state: resynced.state, deadline: resynced.deadline});
     } else {
       send(conn, {type: 'room-list', rooms: publicRoomList()});
     }
@@ -71,6 +80,10 @@ export function attachWebSocketServer(httpServer, sessionMiddleware){
  * @param {import('ws').RawData} raw
  */
 function handleMessage(conn, raw){
+  if(!messageLimit(String(conn.userId))){
+    send(conn, {type: 'error', message: 'Slow down: too many messages.'});
+    return;
+  }
   /** @type {any} */
   let msg;
   try { msg = JSON.parse(raw.toString()); } catch { return; }
@@ -91,8 +104,27 @@ function handleMessage(conn, raw){
         broadcastRoomList();
         break;
       }
+      case 'queue-join': {
+        if(conn.roomId) throw new Error('Leave your room before queuing.');
+        const joined = enqueue({userId: conn.userId, username: conn.username, elo: getRating(conn.userId), conn});
+        if(!joined) throw new Error('You are already in the ranked queue.');
+        send(conn, {type: 'queue-state', status: 'searching'});
+        break;
+      }
+      case 'queue-leave': {
+        dequeue(conn.userId);
+        send(conn, {type: 'queue-state', status: 'idle'});
+        break;
+      }
       case 'leave-room': {
         leaveCurrentRoom(conn);
+        break;
+      }
+      case 'quit-game': {
+        // Quitting a match in progress forfeits this player's seat. Outside a live match it just leaves the room.
+        if(!conn.roomId) break;
+        if(!quitSeat(conn.roomId, conn.userId)) leaveCurrentRoom(conn);
+        else conn.roomId = null;
         break;
       }
       case 'ready': {
@@ -108,14 +140,16 @@ function handleMessage(conn, raw){
         startLiveGame(room.id, room.seats.map(s=>({userId:s.userId, username:s.username})), makeSendToSeat(room.id));
         break;
       }
-      case 'game-action': {
+      case 'submit-guess': {
         if(!conn.roomId) throw new Error('You are not in a room.');
         const room = rooms.get(conn.roomId);
         if(!room || room.status !== 'started') throw new Error('No game in progress.');
         const seatId = room.seats.findIndex(s => s.userId === conn.userId);
         if(seatId === -1) throw new Error('You are not seated in this game.');
-        const action = parseGameAction(msg);
-        if(!submitAction(conn.roomId, seatId, action)) throw new Error('It is not your turn.');
+        // Check the guess before it locks the round, so a bad message can't stop a real answer going in.
+        const guess = parseGuess(msg);
+        if(guess.value === null) throw new Error('Type a number before you lock in.');
+        if(!submitPlayerGuess(conn.roomId, seatId, guess)) throw new Error('Guessing is closed for this round.');
         break;
       }
     }
@@ -125,23 +159,16 @@ function handleMessage(conn, raw){
 }
 
 /**
- * Validates a client-supplied action into the shape betting.js expects. This is the
- * only trust boundary that matters — once it's a well-formed BettingAction, the
- * existing engine (applyRaise's own Math.min(need, chips) clamp, whose-turn-it-is
- * enforcement via the pending-resolver map) is already the authority on whether it's
- * actually legal, exactly as it is for the local single-player client.
+ * Validates a client-supplied answer. The client sends the typed text and the picked unit key. The
+ * shared makeGuess (js/trivia.js) parses them, and an unknown unit or non-number becomes an invalid
+ * guess that scores 0. The once-per-round rule is enforced by the engine.
  * @param {any} msg
- * @returns {import('../js/state.js').BettingAction}
+ * @returns {import('../js/trivia.js').Guess}
  */
-function parseGameAction(msg){
-  if(msg.action === 'fold') return {action: 'fold'};
-  if(msg.action === 'call') return {action: 'call'};
-  if(msg.action === 'raise'){
-    const amount = Number(msg.amount);
-    if(!Number.isFinite(amount)) throw new Error('Invalid raise amount.');
-    return {action: 'raise', amount};
-  }
-  throw new Error('Unknown action.');
+function parseGuess(msg){
+  const text = typeof msg.text === 'string' ? msg.text.slice(0, 40) : '';
+  const unit = typeof msg.unit === 'string' ? msg.unit : '';
+  return makeGuess(text, unit);
 }
 
 /**
@@ -161,8 +188,29 @@ function makeSendToSeat(roomId){
   };
 }
 
+// Turns a group picked by the ranked queue into a normal room, readies everyone, and starts it as a
+// ranked match. Matchmaking has already chosen the players, so there's no ready-up step.
+/** @param {import('./matchmaking.js').QueueEntry[]} group */
+function startRankedMatch(group, bots){
+  const [host, ...rest] = group;
+  const room = createRoom(host.userId, host.username);
+  for(const p of rest) joinRoom(room.id, p.userId, p.username);
+  for(const p of group) p.conn.roomId = room.id;
+  startMatchRoom(room.id);
+  broadcastRoom(room);
+  broadcastRoomList();
+  startLiveGame(
+    room.id,
+    room.seats.map(s => ({userId: s.userId, username: s.username})),
+    makeSendToSeat(room.id),
+    true,
+    bots
+  );
+}
+
 /** @param {Conn} conn */
 function handleDisconnect(conn){
+  dequeue(conn.userId);
   if(!conn.roomId) return;
   const room = rooms.get(conn.roomId);
 

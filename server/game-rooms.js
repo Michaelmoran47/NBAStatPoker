@@ -1,29 +1,46 @@
 // @ts-check
-// Owns the live GameState for each in-progress room and drives it through the exact
-// same engine functions (js/engine.js, js/betting.js) the local single-player client
-// uses — just with a requestAction backed by network messages instead of button
-// clicks, and a render that broadcasts a per-seat hidden-card-redacted view (viewFor,
-// js/state.js) instead of touching a DOM. This is the payoff of keeping that engine
-// DOM-free and state-explicit from the start.
+// Owns the live GameState for each in-progress room and drives it through the same match driver the
+// solo client uses (js/engine.js). The difference is in the inputs: answers arrive over the network,
+// and each seat is sent its own redacted view (viewFor, js/trivia.js) instead of a DOM render.
 
-import { makeGameFromPlayers, viewFor } from '../js/state.js';
-import { playGame, nextRound } from '../js/engine.js';
-import { ACTION_TIMEOUT_MS, timeoutAction } from '../js/betting.js';
+import { makeGame, submitGuess, allGuessed, standings, viewFor, pickQuestions, displayName, botGuess, ROUNDS } from '../js/trivia.js';
+import { QUESTIONS } from '../js/questions.js';
+import { playGame } from '../js/engine.js';
 import { recordForfeit, recordMatchResults } from './matches.js';
 
-// Overridable only for local verification (see .claude/plans) — never set in a real
-// deployment; a short grace period defeats the entire point of having one.
+// Overridable only for local verification. Never set in a real deployment, since a short grace period
+// defeats the point of having one.
 const RECONNECT_GRACE_MS = process.env.TEST_GRACE_MS ? Number(process.env.TEST_GRACE_MS) : 60_000;
-const NEXT_ROUND_DELAY_MS = 4000;
+// How long every seat has to lock in an answer once the question is up. A seat that hasn't answered by
+// then counts as no guess and scores 0.
+export const GUESS_TIME_MS = 18_000;
+// Bots lock in at a random moment in the window. They wait at least this long, and always finish this
+// long before the clock runs out, so a round never closes on a bot that hasn't answered yet.
+const BOT_MIN_DELAY_MS = 3_000;
+const BOT_MARGIN_MS = 2_000;
+
+/**
+ * @typedef {Object} BotSeat
+ * @property {number} seatId
+ * @property {string} username
+ * @property {number} elo
+ * @property {number} spread Guess accuracy, see server/bots.js.
+ */
 
 /**
  * @typedef {Object} LiveGame
- * @property {import('../js/state.js').GameState} G
- * @property {{userId:number, seatId:number}[]} seats Frozen seat->account mapping for this match.
- * @property {Map<number, (action: import('../js/state.js').BettingAction) => void>} resolvers Pending action resolvers, by seat id.
- * @property {Set<number>} disconnectedSeats Seats past their reconnect grace period — auto-fold from here on.
+ * @property {string} roomId
+ * @property {boolean} ranked Whether this match changes ratings.
+ * @property {Map<number, number>|null} eloDeltas Rating change per seat, set once the match ends.
+ * @property {import('../js/trivia.js').GameState} G
+ * @property {{userId:number|null, seatId:number, elo?:number}[]} seats Frozen seat->account mapping for this match. Bots have a null userId.
+ * @property {BotSeat[]} bots The seats the server plays itself.
+ * @property {Set<number>} disconnectedSeats Seats past their reconnect grace period. No longer waited for.
  * @property {Map<number, NodeJS.Timeout>} graceTimers Active grace-period timers, by seat id.
  * @property {Set<number>} forfeitedSeats Seats already recorded as a loss via the forfeit path.
+ * @property {Set<number>} quitSeats Seats that left on purpose. They count as tied for last for ELO.
+ * @property {number|null} guessDeadline Epoch ms when the current guess window closes, for the client countdown.
+ * @property {(() => void)|null} onGuessChange Re-checks whether the round can close early.
  * @property {(seatId:number, payload:unknown)=>void} sendToSeat
  */
 
@@ -33,120 +50,169 @@ const liveGames = new Map();
 /** @param {string} roomId */
 export function hasLiveGame(roomId){ return liveGames.has(roomId); }
 
-/** @param {string} roomId */
-export function getLiveGame(roomId){ return liveGames.get(roomId) ?? null; }
-
-// Called once, when a lobby room's host starts it. `seats` must be in the same order
-// as the room's seat list — seat id i in the resulting GameState IS index i here, and
-// that mapping is frozen for the rest of the match (players can disconnect and
-// reconnect, but the seat list itself never changes once a match is underway).
+// Called once, when a lobby room's host starts it. `seats` order is the seat id order, and that
+// mapping is frozen for the rest of the match. Players can disconnect and reconnect, but the seat list
+// never changes once a match is underway.
 /**
  * @param {string} roomId
  * @param {{userId:number, username:string}[]} seats
  * @param {(seatId:number, payload:unknown)=>void} sendToSeat
+ * @param {boolean} [ranked] Whether this match changes ratings. Defaults to casual.
+ * @param {import('./bots.js').BotProfile[]} [bots] Bots filling the seats after the human ones.
  */
-export function startLiveGame(roomId, seats, sendToSeat){
-  const G = makeGameFromPlayers(seats.map((s,i)=>({id:i, name:s.username, isAI:false})));
+export function startLiveGame(roomId, seats, sendToSeat, ranked = false, bots = []){
+  // Bot seats come after the human seats, so the human seat ids still line up with the room's seat list.
+  /** @type {BotSeat[]} */
+  const botSeats = bots.map((b, k) => ({seatId: seats.length + k, elo: b.elo, spread: b.spread, username: b.username}));
   /** @type {LiveGame} */
   const game = {
-    G,
-    seats: seats.map((s,i)=>({userId:s.userId, seatId:i})),
-    resolvers: new Map(),
+    roomId,
+    ranked,
+    eloDeltas: null,
+    G: makeGame([
+      ...seats.map((s, i) => ({id: i, name: displayName(s.username)})),
+      ...botSeats.map(b => ({id: b.seatId, name: displayName(b.username)}))
+    ]),
+    seats: [
+      ...seats.map((s, i) => ({userId: s.userId, seatId: i})),
+      ...botSeats.map(b => ({userId: null, seatId: b.seatId, elo: b.elo}))
+    ],
+    bots: botSeats,
     disconnectedSeats: new Set(),
     graceTimers: new Map(),
     forfeitedSeats: new Set(),
+    quitSeats: new Set(),
+    guessDeadline: null,
+    onGuessChange: null,
     sendToSeat
   };
   liveGames.set(roomId, game);
-
-  const render = (/** @type {number|undefined} */ actingId, /** @type {any} */ lastAction) =>
-    broadcastState(roomId, actingId, lastAction);
-  // Same ACTION_TIMEOUT_MS chess-clock as solo (js/ui.js's requestAction) — the
-  // `game.resolvers.get(seatId) === res` check is this driver's equivalent of solo's
-  // `state.resolveHuman === res` guard: it's what makes a `game-action` message that
-  // arrives just after the clock ran out a harmless no-op (submitAction below finds no
-  // matching resolver) instead of resolving whatever this seat's *next* turn is waiting
-  // on. Independent of markDisconnected's much longer RECONNECT_GRACE_MS below — that's
-  // about detecting a dropped socket, this is about pacing a turn regardless of
-  // connection status.
-  /** @type {import('../js/state.js').RequestActionFn} */
-  const requestAction = (seatId) => {
-    if(game.disconnectedSeats.has(seatId)) return Promise.resolve({action:'fold'});
-    return new Promise(res => {
-      game.resolvers.set(seatId, res);
-      setTimeout(()=>{
-        if(game.resolvers.get(seatId) === res){
-          game.resolvers.delete(seatId);
-          const p = /** @type {import('../js/state.js').GamePlayer} */ (game.G.players.find(x=>x.id===seatId));
-          res(timeoutAction(game.G, p));
-        }
-      }, ACTION_TIMEOUT_MS);
-    });
-  };
-
-  runGame(roomId, game, render, requestAction);
+  runGame(game);
 }
 
 /**
- * @param {string} roomId
+ * Resolves once every seat that is still connected has answered, or once the guess clock runs out.
+ * A seat past its reconnect grace period isn't waited for.
  * @param {LiveGame} game
- * @param {import('../js/state.js').RenderFn} render
- * @param {import('../js/state.js').RequestActionFn} requestAction
+ * @returns {Promise<void>}
  */
-async function runGame(roomId, game, render, requestAction){
-  await playGame(game.G, render, requestAction);
-  while(liveGames.has(roomId) && game.G.stage !== 'game-over'){
-    await sleep(NEXT_ROUND_DELAY_MS);
-    if(!liveGames.has(roomId)) return; // room was torn down while we waited
-    await nextRound(game.G, render, requestAction);
-  }
-  if(liveGames.has(roomId)){
-    const winners = game.G.gameResult?.winners ?? [];
-    recordMatchResults(roomId, game.seats, winners, game.forfeitedSeats);
-    // Let the final game-over state reach clients before tearing the room down.
-    liveGames.delete(roomId);
-  }
+function awaitGuesses(game){
+  return new Promise(resolve => {
+    /** @type {NodeJS.Timeout[]} */
+    const botTimers = [];
+    const finish = () => {
+      clearTimeout(timer);
+      for(const t of botTimers) clearTimeout(t);
+      game.onGuessChange = null;
+      game.guessDeadline = null;
+      resolve();
+    };
+    const timer = setTimeout(finish, GUESS_TIME_MS);
+    game.guessDeadline = Date.now() + GUESS_TIME_MS;
+    game.onGuessChange = () => {
+      const waitingOn = game.G.players.map(p => p.id).filter(id => !game.disconnectedSeats.has(id));
+      if(allGuessed(game.G, waitingOn)) finish();
+    };
+    // Each bot answers once, at a random point in the window, so the bots don't all lock in the moment it opens.
+    const botWindow = GUESS_TIME_MS - BOT_MIN_DELAY_MS - BOT_MARGIN_MS;
+    for(const bot of game.bots){
+      botTimers.push(setTimeout(() => {
+        const question = game.G.question;
+        if(!question) return;
+        submitGuess(game.G, bot.seatId, botGuess(question, Math.random, bot.spread));
+        game.onGuessChange?.();
+      }, BOT_MIN_DELAY_MS + Math.random() * botWindow));
+    }
+    // The driver's own render() ran before the deadline existed, so re-send now that clients can count down.
+    broadcastState(game);
+    game.onGuessChange();
+  });
 }
-
-/** @param {number} ms */
-function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 
 /**
- * @param {string} roomId
- * @param {number} [actingId]
- * @param {import('../js/state.js').LastAction} [lastAction]
+ * @param {LiveGame} game
  */
-function broadcastState(roomId, actingId, lastAction){
-  const game = liveGames.get(roomId);
-  if(!game) return;
+async function runGame(game){
+  const { roomId } = game;
+  const questions = pickQuestions(QUESTIONS, ROUNDS);
+  await playGame(game.G, {
+    questions,
+    render: () => broadcastState(game),
+    awaitGuesses: () => awaitGuesses(game),
+    isAlive: () => liveGames.get(roomId) === game
+  });
+
+  if(liveGames.get(roomId) !== game) return; // room was torn down mid-match
+  const placeBySeat = new Map(standings(game.G).map(p => [p.id, p.place]));
+  // A player who quit is ranked tied for last, whatever their score was, so quitting always costs rating.
+  const stayedPlaces = [...placeBySeat].filter(([id]) => !game.quitSeats.has(id)).map(([, place]) => place);
+  const lastPlace = stayedPlaces.length ? Math.max(...stayedPlaces) : 1;
+  for(const id of game.quitSeats) placeBySeat.set(id, lastPlace);
+  game.eloDeltas = recordMatchResults(roomId, game.seats, placeBySeat, game.forfeitedSeats, game.ranked);
+  // The driver already sent the game-over state, before ratings were known. Send it again with each
+  // seat's rating change. Then tear the room down.
+  broadcastState(game);
+  liveGames.delete(roomId);
+}
+
+/**
+ * Sends every seat its own redacted view of the match.
+ * @param {LiveGame} game
+ */
+function broadcastState(game){
   for(const p of game.G.players){
-    game.sendToSeat(p.id, {type:'game-state', state: viewFor(game.G, p.id), actingId, lastAction});
+    game.sendToSeat(p.id, {
+      type: 'game-state',
+      state: viewFor(game.G, p.id),
+      deadline: game.guessDeadline,
+      eloDeltas: game.eloDeltas ? Object.fromEntries(game.eloDeltas) : null
+    });
   }
 }
 
-// Called by the WS layer when an authenticated seat's socket sends a game-action
-// message. Returns false if there was no pending request for that seat — i.e. it
-// wasn't actually their turn, or the room has no live game — so ws.js can reject the
-// message instead of silently accepting an out-of-turn action.
+// Called by the WS layer when an authenticated seat's socket sends a 'submit-guess' message. Returns
+// false if the room has no live game, guessing is closed, or the seat already answered this round.
 /**
  * @param {string} roomId
  * @param {number} seatId
- * @param {import('../js/state.js').BettingAction} action
+ * @param {import('../js/trivia.js').Guess} guess
  * @returns {boolean}
  */
-export function submitAction(roomId, seatId, action){
+export function submitPlayerGuess(roomId, seatId, guess){
   const game = liveGames.get(roomId);
-  const resolver = game?.resolvers.get(seatId);
-  if(!game || !resolver) return false;
-  game.resolvers.delete(seatId);
-  resolver(action);
+  if(!game || !submitGuess(game.G, seatId, guess)) return false;
+  broadcastState(game);
+  game.onGuessChange?.();
   return true;
 }
 
-// Starts this seat's reconnect grace period. Doesn't fold them immediately — a real
-// network hiccup shouldn't cost a ranked loss — but if the window expires without a
-// markReconnected() call, they're auto-folded for the rest of the match and recorded
-// as a loss per the locked forfeit policy, independent of how the match ends up.
+// The player chose to leave a match in progress. Their seat stops being waited for at once (no grace
+// period, since leaving is deliberate), they score 0 each round from now on, and the loss is recorded
+// straight away. Returns false if the player isn't in a live match.
+/**
+ * @param {string} roomId
+ * @param {number} userId
+ * @returns {boolean}
+ */
+export function quitSeat(roomId, userId){
+  const game = liveGames.get(roomId);
+  const seat = game?.seats.find(s => s.userId === userId);
+  if(!game || !seat || game.forfeitedSeats.has(seat.seatId)) return false;
+
+  const grace = game.graceTimers.get(seat.seatId);
+  if(grace){ clearTimeout(grace); game.graceTimers.delete(seat.seatId); }
+  game.disconnectedSeats.add(seat.seatId);
+  game.forfeitedSeats.add(seat.seatId);
+  game.quitSeats.add(seat.seatId);
+  recordForfeit(roomId, userId);
+  game.onGuessChange?.();
+  broadcastState(game);
+  return true;
+}
+
+// Starts this seat's reconnect grace period. This doesn't count them out immediately, since a network
+// hiccup shouldn't cost a ranked loss. But once the window expires without a markReconnected() call,
+// they stop being waited for, score 0 each round, and are recorded as a forfeit loss.
 /**
  * @param {string} roomId
  * @param {number} seatId
@@ -160,49 +226,36 @@ export function markDisconnected(roomId, seatId){
     game.disconnectedSeats.add(seatId);
     game.forfeitedSeats.add(seatId);
 
-    const resolver = game.resolvers.get(seatId);
-    if(resolver){
-      game.resolvers.delete(seatId);
-      resolver({action:'fold'});
-    }
-
-    const userId = game.seats.find(s=>s.seatId===seatId)?.userId;
-    if(userId!==undefined) recordForfeit(roomId, userId);
+    const userId = game.seats.find(s => s.seatId === seatId)?.userId;
+    if(userId !== undefined) recordForfeit(roomId, userId);
+    game.onGuessChange?.();
+    broadcastState(game);
   }, RECONNECT_GRACE_MS);
 
   game.graceTimers.set(seatId, timer);
 }
 
-// Cancels a pending grace-period timer (if any) and returns a fresh sanitized view to
-// resync the reconnecting client with — the same shape every other render() call
-// sends, so the client needs no special "I just reconnected" handling at all — except
-// that if it's genuinely this seat's turn (their action was still pending when they
-// dropped), the resync has to say so via actingId, or a reconnecting client has no way
-// to know it owes an action: bettingRound() is still awaiting the same original
-// requestAction() promise, so nothing will re-prompt them otherwise.
+// Cancels a pending grace-period timer (if any) and returns a fresh redacted view so the reconnecting
+// client can resync. The client needs no special "I just reconnected" path.
 /**
  * @param {string} roomId
  * @param {number} seatId
- * @returns {{state: import('../js/state.js').GameState, actingId: number|undefined}|null}
+ * @returns {{state: ReturnType<typeof viewFor>, deadline: number|null}|null}
  */
 export function markReconnected(roomId, seatId){
   const game = liveGames.get(roomId);
   if(!game) return null;
   const timer = game.graceTimers.get(seatId);
   if(timer){ clearTimeout(timer); game.graceTimers.delete(seatId); }
-  return {
-    state: viewFor(game.G, seatId),
-    actingId: game.resolvers.has(seatId) ? seatId : undefined
-  };
+  return {state: viewFor(game.G, seatId), deadline: game.guessDeadline};
 }
 
-// Which room (if any) a given user is currently a live seat in — used on a fresh
-// connection to detect "this is actually a reconnect", not a linear-scan concern at
-// hobby scale (a handful of concurrent rooms, not thousands).
+// Which room (if any) a given user is currently a live seat in. Used on a fresh connection to tell a
+// reconnect apart from a new join.
 /** @param {number} userId */
 export function findLiveRoomForUser(userId){
   for(const [roomId, game] of liveGames){
-    const seat = game.seats.find(s=>s.userId===userId);
+    const seat = game.seats.find(s => s.userId === userId);
     if(seat) return {roomId, seatId: seat.seatId};
   }
   return null;

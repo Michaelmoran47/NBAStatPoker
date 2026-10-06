@@ -1,595 +1,614 @@
 // @ts-check
-// All DOM rendering and user-input handling. This is the only module that touches
-// `document` — everything it needs from the game (state, rules, scoring) is imported,
-// nothing here leaks the other direction. That keeps the door open to swapping this
-// file out for a different client (or a thin multiplayer client) without touching engine.js.
+// The only module that touches `document`. It draws the question, the number box with its unit dropdown,
+// round results and final standings from a redacted view (viewFor, js/trivia.js). The solo client runs
+// the match driver here. The multiplayer lobby (lobby/lobby.js) calls renderGame() with server views.
+// Both get the same markup.
 
-import { ANTE, MIN_RAISE, ROUNDS, makeGame } from './state.js';
-import { currentMaxBet, ACTION_TIMEOUT_MS, timeoutAction } from './betting.js';
-import { playGame, nextRound as engineNextRound } from './engine.js';
-import { CATS } from './data.js';
+import { UNITS, ROUNDS, MAX_POINTS, parseNumber, makeGuess, formatNumber, formatRounded, pickQuestions, seededRandom, dailyKey, dailyNumber, makeGame, submitGuess, viewFor } from './trivia.js';
+import { QUESTIONS } from './questions.js';
+import { playGame, ROUND_RESULT_MS } from './engine.js';
 
-// A Category's `fmt` is a function — fine for solo play, where the GameState is a live
-// JS object, but a multiplayer GameState travels over the wire as JSON, and
-// JSON.stringify silently drops function-valued properties. A category object received
-// from the server has everything *except* fmt. Always resolve fmt from this client's
-// own local CATS by key instead of trusting the transmitted object to carry it.
-/**
- * @param {string} key
- * @param {number} value
- * @returns {string}
- */
-function fmtStat(key, value){
-  const cat = CATS.find(c=>c.key===key);
-  return cat ? cat.fmt(value) : String(value);
+// Matches the server's GUESS_TIME_MS in server/game-rooms.js.
+const GUESS_TIME_MS = 18_000;
+
+// Length of the guess window, shown as the answer timer bar.
+const GUESS_TOTAL_MS = 18_000;
+
+// Names for the solo CPU opponents. Two are drawn at random for each match.
+const CPU_NAMES = ['Ace', 'Blaze', 'Cobra', 'Dyna', 'Echo', 'Flint', 'Glacier', 'Haze', 'Ivy', 'Jett', 'Koda', 'Lynx', 'Maverick', 'Nova', 'Onyx', 'Piper', 'Quill', 'Raven', 'Sable', 'Tempo', 'Vex', 'Wren', 'Yara', 'Zephyr'];
+
+// The number box and unit dropdown survive re-renders. Other players' answers re-render the whole
+// screen, and without this a half-typed answer would vanish.
+let draftText = '';
+let draftUnit = '';
+let lastRoundNum = null;
+/** The round whose result pause is running, and when it started. Used to drain the results timer bar. */
+let resultRound = null;
+let resultStart = 0;
+// Set to 'final' once the winner's confetti has fired for this match, so re-renders don't fire it again.
+let confettiDone = null;
+
+/** @type {ReturnType<typeof setInterval>|null} */
+let timerFrame = /** @type {number|null} */ (null);
+// The round whose result pause is running, and when it started. Used to drain the results timer bar.
+
+
+
+// Escapes text for both element content and quoted attribute values.
+/** @param {string} s */
+export function escapeHtml(s){
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c] ?? c);
 }
 
-// This client's own local game session — state.js itself holds no mutable state any
-// more (see its header comment), so the one-and-only GameState a solo game needs to
-// remember lives here instead, alongside the pending-action resolver requestAction()
-// uses in place of a server socket.
-/** @type {{G: import('./state.js').GameState|null, resolveHuman: ((result: import('./state.js').BettingAction) => void)|null}} */
-const state = { G: null, resolveHuman: null };
-
-// How long the round-reveal animation holds on each player's combined stat before the
-// card flies to the winner, and how long that flight itself takes. Both the solo
-// auto-advance timer below and the animation sequencing in renderGame() are driven off
-// these same two numbers so they can never drift out of sync with each other.
-const REVEAL_HOLD_MS = 5000;
-const CARD_FLY_MS = 650;
-
-// A single chip's travel time (matches the .chip-fly transition duration in CSS — kept
-// here too since flyChip's cleanup setTimeout needs to know when the animation is
-// actually done). A raise fires two chips STAGGER_MS apart rather than nearly at once —
-// that gap is what actually reads as "more chips going in" instead of a call with an
-// extra chip blurred on top of it.
-const CHIP_FLY_MS = 500;
-const RAISE_CHIP_STAGGER_MS = 220;
-// How long the floating "CALL $X"/"RAISE $X" label stays up — matches .bet-amount-pop's
-// own animation duration in CSS.
-const BET_POP_MS = 900;
-
-// There used to be a "Next Round" button the human clicked once they'd read the round
-// result. Now that round-result is a timed animation instead of a static popup, solo
-// play needs to drive itself forward the same way the multiplayer server already does
-// for everyone else (see NEXT_ROUND_DELAY_MS in server/game-rooms.js) — this timer is
-// solo's equivalent. Lives here (not in renderGame) because renderGame is also called
-// directly by the multiplayer client, which must never self-advance a server-authoritative
-// match.
-/** @type {ReturnType<typeof setTimeout>|null} */
-let advanceTimer = null;
-
-// Tracks which round-result the animation has already played for, so a re-render that
-// doesn't represent a *new* round outcome (there shouldn't be one, but better safe)
-// never restarts the reveal from scratch. Keyed by round number + category rather than
-// object identity, since a multiplayer GameState is JSON off the wire — a fresh object
-// every broadcast even when nothing actually changed.
-/** @type {string|null} */
-let lastRevealedResultKey = null;
-
-// Tracks which round-result's winnings have actually "landed" — set inside
-// flyStatCardToWinners's own landing timeout, the moment the flying card reaches the
-// winner. Until then, renderGame() deliberately displays a winner's *pre-round* chips
-// and tally (see displayChips/displayTallyIcons below) even though G.players itself was
-// already updated back when resolveRound() ran — so a stray re-render mid-reveal (e.g.
-// multiplayer's reconnect resync) can't let the real numbers leak out early.
-/** @type {string|null} */
-let landedResultKey = null;
-
-/**
- * @param {'fold'|'call'|'raise'} action
- * @param {number} [amount]
- */
-export function humanAction(action, amount){
-  if(!state.resolveHuman) return;
-  const r = state.resolveHuman;
-  state.resolveHuman = null;
-  r(/** @type {import('./state.js').BettingAction} */ ({action, amount}));
+/** @param {string} key */
+function unitLabel(key){
+  return UNITS.find(u => u.key === key)?.label ?? '';
 }
 
-// The client's requestAction: there's only ever one non-AI seat (seat 0, "You"), and
-// "waiting for the human" just means holding onto this Promise's resolver until a
-// button click calls humanAction() above — or, if ACTION_TIMEOUT_MS passes first, until
-// this timeout resolves it itself. The `state.resolveHuman === res` check is what makes
-// a late click harmless once that's happened: humanAction() reads state.resolveHuman
-// fresh at click time, so if the timeout already nulled it out (or a later turn already
-// replaced it with its own resolver), a stale click is a no-op instead of hijacking
-// whatever's currently pending.
-/** @type {import('./state.js').RequestActionFn} */
-function requestAction(seatId){
-  return new Promise(res => {
-    state.resolveHuman = res;
-    setTimeout(()=>{
-      if(state.resolveHuman === res && state.G){
-        state.resolveHuman = null;
-        const p = /** @type {import('./state.js').GamePlayer} */ (state.G.players.find(x=>x.id===seatId));
-        res(timeoutAction(state.G, p));
-      }
-    }, ACTION_TIMEOUT_MS);
+/** @param {string} selected */
+function unitOptions(selected){
+  return UNITS.map(u =>
+    `<option value="${u.key}" ${u.key === selected ? 'selected' : ''}>${u.key ? escapeHtml(u.label) : '—'}</option>`
+  ).join('');
+}
+
+// Live readout of what the typed number works out to, e.g. "3.5 million = 3,500,000". Empty until the
+// input is a valid number.
+function previewText(){
+  const g = makeGuess(draftText, draftUnit);
+  if(g.value === null) return draftText.trim() ? 'Enter a plain number' : ' ';
+  return `= ${formatNumber(g.value)}`;
+}
+
+/**
+ * The rating change shown on the final standings. Casual matches and solo games have no rating
+ * change, so they show a dash.
+ * @param {Record<string, number>|null|undefined} deltas
+ * @param {number} id
+ */
+function eloCell(deltas, id){
+  const d = deltas ? deltas[String(id)] : undefined;
+  if(d === undefined) return '<span class="g-dist mono">\u2014</span>';
+  const text = d > 0 ? `+${d}` : d < 0 ? `\u2212${Math.abs(d)}` : '0';
+  const cls = d > 0 ? 'elo-up' : d < 0 ? 'elo-down' : '';
+  return `<span class="g-dist mono ${cls}">${text}</span>`;
+}
+
+/**
+ * Closeness tier. Gold is an exact answer, green is within 3% of the true answer, and yellow is within 10%.
+ * @param {number|null} pctOff
+ */
+function tierOf(pctOff){
+  if(pctOff === null) return '';
+  if(pctOff === 0) return 'gold';
+  if(pctOff <= 0.03) return 'green';
+  if(pctOff <= 0.10) return 'yellow';
+  return '';
+}
+
+/**
+ * How a round's points read on the results: a percentage for the daily (closeness scoring), and plain
+ * points for practice and multiplayer (place scoring).
+ * @param {number} points
+ * @param {ReturnType<typeof viewFor>} view
+ */
+function scoreLabel(points, view){
+  return view.scoring === 'closeness' ? `${Math.round((points / MAX_POINTS) * 100)}%` : `${points} pts`;
+}
+
+/**
+ * Every answer ranked by closeness to the true number, closest first. Players with no valid answer
+ * sit at the bottom.
+ * @param {import('./trivia.js').RoundResult} r
+ * @param {ReturnType<typeof viewFor>} view
+ */
+function closenessList(r, view){
+  const nameOf = (/** @type {number} */ id) => view.players.find(p => p.id === id)?.name ?? '?';
+  const ordered = r.entries.slice().sort((x, y) => {
+    const ax = x.pctOff ?? Infinity;
+    const ay = y.pctOff ?? Infinity;
+    return (ax - ay) || nameOf(x.playerId).localeCompare(nameOf(y.playerId));
   });
-}
-
-export function renderStart(){
-  const app = /** @type {HTMLElement} */ (document.getElementById('app'));
-  app.innerHTML = `
-    <div id="start-screen">
-      <h2>Ready to play?</h2>
-      <p>Each player is dealt 2 "hole" NBA legends and keeps them for the whole game.
-      ${ROUNDS} community cards are revealed one at a time — a stat category each — with
-      a round of betting before every reveal. Whoever has the higher combined stat wins
-      that card and its pot. The goal is to end up with the most money — go broke and
-      you're out for the rest of the match. Whoever has the most chips when only one
-      player's left, or after ${ROUNDS} rounds, wins.</p>
-      <div>
-        Opponents:
-        <select id="numOpp">
-          <option value="1">1 CPU opponent</option>
-          <option value="2" selected>2 CPU opponents</option>
-        </select>
-      </div>
-      <button class="btn-next" onclick="startGame()">Deal Me In</button>
-      <div class="rules">
-        <b>Rules:</b> Everyone antes $${ANTE} into the pot each round. One stat category is
-        revealed as that round's community card, followed by a betting round (check/call,
-        raise, or fold). Whoever has the higher combined stat across their two hole players
-        wins the card and that round's pot — ties split the pot and every tied player gets
-        the card. This repeats ${ROUNDS} times with the same hole cards throughout.
-        If your bank hits $0 after a round, you're eliminated and become a spectator for
-        the rest of the match. The match ends the moment only one player still has money
-        left, or after ${ROUNDS} rounds if everyone's still in — whoever has the most
-        chips at that point wins.
-      </div>
-    </div>`;
-}
-
-export function startGame(){
-  const numOpp = /** @type {HTMLSelectElement} */ (document.getElementById('numOpp'));
-  const n = parseInt(numOpp.value,10);
-  state.G = makeGame(n);
-  playGame(state.G, render, requestAction);
-}
-
-export function nextRound(){
-  if(state.G) engineNextRound(state.G, render, requestAction);
-}
-
-export function doRaise(){
-  const slider = /** @type {HTMLInputElement} */ (document.getElementById('raiseSlider'));
-  const amt = parseInt(slider.value,10);
-  humanAction('raise', amt);
-}
-
-/** Keeps the Raise button's label in sync while the slider is being dragged,
- * without forcing a full re-render (which would interrupt the drag).
- * @param {string} value
- */
-export function updateRaiseLabel(value){
-  const btn = document.getElementById('raiseBtn');
-  if(btn) btn.textContent = 'Raise ' + value;
-}
-
-const PERSON_ICON = `<svg class="id-icon" viewBox="0 0 200 260">
-  <circle cx="100" cy="80" r="66" fill="none" stroke="currentColor" stroke-width="10"/>
-  <line x1="70" y1="144" x2="35" y2="240" stroke="currentColor" stroke-width="10" stroke-linecap="round"/>
-  <line x1="130" y1="144" x2="165" y2="240" stroke="currentColor" stroke-width="10" stroke-linecap="round"/>
-</svg>`;
-
-/**
- * @param {import('./state.js').GamePlayer} p
- * @param {number|undefined} actingId
- * @param {boolean} revealHoles
- * @param {'seat-left'|'seat-right'} side
- * @param {boolean} justChecked
- * @param {number} displayChips What to show for this seat's chip total — may be less
- *   than p.chips while this round's win hasn't "landed" yet (see landedResultKey).
- * @param {import('./data.js').Category[]} displayTally Which tally icons to show — may
- *   omit this round's just-won card for the same reason.
- * @param {{text:string, isWinner:boolean, folded:boolean}|null} stat This round's
- *   combined-stat badge, shown right on the seat during the reveal — null outside that
- *   window. `folded` is only ever true for the human's own private post-fold reveal
- *   (see humanStat in renderGame) — opponents never get one, folded or not.
- */
-function renderSeat(p, actingId, revealHoles, side, justChecked, displayChips, displayTally, stat){
-  // A player who's busted has their cards removed for the rest of the match — no
-  // card-backs to hide behind, just a spectator tag where their chip count used to be —
-  // but once the match itself is over (revealHoles), everyone's hand goes face-up same
-  // as everyone else's, spectator or not.
-  const cardsHtml = (p.eliminated && !revealHoles)
-    ? `<div class="spectator-tag">Spectator</div>`
-    : `<div class="seat-cards">
-        ${[0,1].map(i=>{
-          return revealHoles
-            ? `<div class="mini-card revealed">${p.hole[i].name.split(' ').slice(-1)[0]}</div>`
-            : `<div class="mini-card back">🏀</div>`;
-        }).join('')}
-      </div>`;
-
-  // The stat badge sits beside the cards (in their own row), not stacked underneath the
-  // name/chips — reads as "here's their hand's number" rather than another line in the
-  // vertical stack of seat info.
-  const statPopHtml = stat ? `<div class="seat-stat-pop ${stat.isWinner?'winner':''}">${stat.text}</div>` : '';
-
-  return `
-    <div class="seat ${side} ${p.folded?'folded':''} ${p.eliminated?'eliminated':''} ${actingId===p.id?'acting':''} ${justChecked?'just-checked':''}" data-seat="${p.id}">
-      ${justChecked ? `<div class="check-tap">✊</div>` : ''}
-      <div class="seat-cards-row">${cardsHtml}${statPopHtml}</div>
-      <div class="seat-name">${p.name}</div>
-      ${p.eliminated ? '' : `<div class="seat-chips chip-amount">$${displayChips}${p.allIn?' (all-in)':''}</div>`}
-      <div class="cards-tally">${displayTally.map(c=>c.icon).join('')}</div>
-    </div>`;
-}
-
-// Sends a small poker chip flying from wherever the bet came from to the pot, then
-// bumps the pot number once it "lands". Runs for both the human's and CPUs' actions,
-// since both flow through the same post-action render() call in betting.js.
-/**
- * @param {string} fromSelector
- * @param {number} [delay]
- */
-function flyChip(fromSelector, delay){
-  setTimeout(()=>{
-    const fromEl = document.querySelector(fromSelector);
-    const potEl = document.getElementById('potAmount');
-    if(!fromEl || !potEl) return;
-    const from = fromEl.getBoundingClientRect();
-    const to = potEl.getBoundingClientRect();
-    const chip = document.createElement('div');
-    chip.className = 'chip-fly';
-    chip.style.left = (from.left + from.width/2 - 10) + 'px';
-    chip.style.top = (from.top + from.height/2 - 10) + 'px';
-    document.body.appendChild(chip);
-    const dx = (to.left + to.width/2) - (from.left + from.width/2);
-    const dy = (to.top + to.height/2) - (from.top + from.height/2);
-    requestAnimationFrame(()=>{
-      chip.style.transform = `translate(${dx}px,${dy}px) scale(.55)`;
-      chip.style.opacity = '0';
-    });
-    setTimeout(()=>{ chip.remove(); }, CHIP_FLY_MS + 180); // + the opacity fade's own tail, see .chip-fly
-  }, delay || 0);
-}
-
-// The floating "CALL $X" / "RAISE $X" label — appended to document.body rather than
-// baked into the seat's own template markup for the same reason flyChip is: the next
-// actor's "your turn" render fires only ~150ms later (see bettingRound's sleep(150) in
-// betting.js) and would wipe out anything embedded in #app's innerHTML long before its
-// own animation actually finished. Living outside #app is what lets this play its full
-// BET_POP_MS instead of getting cut off after a fraction of it.
-/**
- * @param {string} fromSelector
- * @param {'call'|'raise'} action
- * @param {number|undefined} amount
- */
-function popBetAmount(fromSelector, action, amount){
-  if(amount===undefined) return;
-  const fromEl = document.querySelector(fromSelector);
-  if(!fromEl) return;
-  const rect = fromEl.getBoundingClientRect();
-  const label = document.createElement('div');
-  label.className = `bet-amount-pop ${action}`;
-  label.textContent = `${action==='raise' ? 'RAISE' : 'CALL'} $${amount}`;
-  label.style.left = (rect.left + rect.width/2) + 'px';
-  label.style.top = rect.top + 'px';
-  document.body.appendChild(label);
-  setTimeout(()=>{ label.remove(); }, BET_POP_MS);
-}
-
-// The second half of the round-reveal sequence: clones the center stat card and sends
-// one copy flying to each winner's seat (more than one on a tie), then bumps that
-// seat's card tally once it "lands" — same clone-a-floating-element-and-transform
-// technique as flyChip above, just with a dynamic per-seat destination instead of a
-// single fixed pot target. This is also the moment the winner's chip total and tally
-// icon actually update in the DOM — renderGame() was deliberately showing pre-round
-// values until now (see displayChips/displayTally + landedResultKey), so patching them
-// in here means the win visibly *arrives* with the card instead of already having
-// happened silently five seconds earlier.
-/**
- * @param {import('./state.js').GameState} G
- * @param {number[]} winnerIds
- * @param {string} resultKey
- */
-function flyStatCardToWinners(G, winnerIds, resultKey){
-  const cardEl = document.querySelector('.center-column .stat-card');
-  if(!cardEl) return;
-  const from = cardEl.getBoundingClientRect();
-  winnerIds.forEach(id=>{
-    const seatEl = document.querySelector(`[data-seat="${id}"]`);
-    const tallyEl = seatEl && seatEl.querySelector('.cards-tally');
-    const chipEl = seatEl && seatEl.querySelector('.chip-amount');
-    if(!seatEl) return;
-    const to = (tallyEl || seatEl).getBoundingClientRect();
-    const clone = /** @type {HTMLElement} */ (cardEl.cloneNode(true));
-    clone.classList.add('stat-card-fly');
-    clone.style.width = from.width + 'px';
-    clone.style.height = from.height + 'px';
-    clone.style.left = from.left + 'px';
-    clone.style.top = from.top + 'px';
-    document.body.appendChild(clone);
-    const dx = (to.left + to.width/2) - (from.left + from.width/2);
-    const dy = (to.top + to.height/2) - (from.top + from.height/2);
-    requestAnimationFrame(()=>{
-      clone.style.transform = `translate(${dx}px,${dy}px) scale(.2)`;
-      clone.style.opacity = '0';
-    });
-    setTimeout(()=>{
-      clone.remove();
-      landedResultKey = resultKey;
-      const player = G.players.find(pl=>pl.id===id);
-      if(player){
-        const allInTag = seatEl.classList.contains('you-seat') ? '' : (player.allIn ? ' (all-in)' : ''); // matches each seat's own pre-existing formatting
-        if(chipEl) chipEl.textContent = `$${player.chips}${allInTag}`;
-        if(tallyEl) tallyEl.innerHTML = player.wonCategories.map(c=>c.icon).join('');
-      }
-      if(tallyEl){
-        tallyEl.classList.add('just-won');
-        setTimeout(()=>tallyEl.classList.remove('just-won'), 500);
-      }
-    }, CARD_FLY_MS);
-  });
-}
-
-// Local single-player wiring: renderGame always needs a GameState + whose seat is
-// "you" explicitly, but engine.js's RenderFn only ever calls render(actingId,
-// lastAction) — this closes over this client's own state/seat (always 0) so that
-// shape still matches, without renderGame itself needing to assume single-player.
-/**
- * @param {number} [actingId] Whose turn it is right now, if anyone.
- * @param {import('./state.js').LastAction} [lastAction] What just happened,
- *   so this render can play the matching one-shot animation (chip flight, fold fade,
- *   pot bump, check tap) — set only on the render call immediately after an action is applied.
- */
-export function render(actingId, lastAction){
-  if(!state.G){ renderStart(); return; }
-  renderGame(state.G, actingId, lastAction, 0, 'solo');
-
-  // Solo drives its own round-to-round pacing (multiplayer's equivalent lives in
-  // server/game-rooms.js's runGame loop instead). Only (re)armed on the render that
-  // actually entered round-result — every other render this round (betting actions,
-  // etc.) leaves stage something else and this is a no-op.
-  if(state.G.stage==='round-result'){
-    if(advanceTimer) clearTimeout(advanceTimer);
-    advanceTimer = setTimeout(()=>{
-      advanceTimer = null;
-      if(state.G && state.G.stage==='round-result') nextRound();
-    }, REVEAL_HOLD_MS + CARD_FLY_MS + 400);
-  }
-}
-
-// The shared render — used directly by the local single-player wrapper above, and by
-// the multiplayer client (lobby/lobby.js) with server-pushed state instead of a local
-// GameState, and mySeatId taken from wherever the player actually ended up sitting
-// (join order, not always 0). 'solo' vs 'multiplayer' only changes two things: whether
-// "Next Round" is clickable (multiplayer's server advances rounds on its own timer —
-// nothing is waiting on that click) and what happens after game-over.
-/**
- * @param {import('./state.js').GameState} G
- * @param {number|undefined} actingId Whose turn it is right now, if anyone.
- * @param {import('./state.js').LastAction|undefined} lastAction What just happened,
- *   so this render can play the matching one-shot animation (chip flight, fold fade,
- *   pot bump, check tap) — set only on the render call immediately after an action is applied.
- * @param {number} mySeatId Which player id is "you".
- * @param {'solo'|'multiplayer'} mode
- */
-export function renderGame(G, actingId, lastAction, mySeatId, mode){
-  const app = /** @type {HTMLElement} */ (document.getElementById('app'));
-  const human = /** @type {import('./state.js').GamePlayer} */ (G.players.find(p=>p.id===mySeatId));
-  const opponents = G.players.filter(p=>p.id!==mySeatId);
-
-  // Hole cards stay face-down for the entire match — who's actually holding what stays
-  // a mystery until the very end, even after individual rounds resolve.
-  const revealHoles = G.stage==='game-over';
-  const checkedId = lastAction && lastAction.action==='check' ? lastAction.playerId : null;
-
-  // While this round's result is showing but hasn't "landed" yet (see landedResultKey's
-  // own comment), a winner's chip total and tally icon are deliberately displayed as
-  // they were *before* this round's payout — the win visibly arrives with the card-fly
-  // animation instead of having already happened silently the instant the round ended.
-  // gameNum is part of the key (not just round+category) so a new game's round 1
-  // revealing the same category its predecessor's round 1 did doesn't get mistaken for
-  // "already handled" and skip both the reveal animation and the payout suppression.
-  const resultKey = G.roundResult ? `${G.gameNum}:${G.round}:${G.roundResult.category.key}` : null;
-  const isPendingReveal = resultKey!==null && (G.stage==='round-result' || G.stage==='game-over') && resultKey!==landedResultKey;
-  /** @param {import('./state.js').GamePlayer} p @returns {number} */
-  const displayChips = p => {
-    if(isPendingReveal && G.roundResult && G.roundResult.winners.includes(p.id)){
-      return p.chips - (G.roundResult.payouts[p.id] || 0);
-    }
-    return p.chips;
-  };
-  /** @param {import('./state.js').GamePlayer} p @returns {import('./data.js').Category[]} */
-  const displayTally = p => {
-    if(isPendingReveal && G.roundResult && G.roundResult.winners.includes(p.id)){
-      return p.wonCategories.slice(0, -1);
-    }
-    return p.wonCategories;
-  };
-  // The round-reveal's combined-stat badge, shown right on each player's own seat
-  // (rather than in one separate list you have to match names against) for as long as
-  // the result is up — fades out on its own cue once the card starts its flight, same
-  // moment displayChips/displayTally above start telling the truth.
-  /** @param {import('./state.js').GamePlayer} p @returns {{text:string, isWinner:boolean, folded:boolean}|null} */
-  const statFor = p => {
-    const rr = G.roundResult;
-    if(!rr || !(G.stage==='round-result' || G.stage==='game-over') || !(p.id in rr.values)) return null;
-    return {text: fmtStat(rr.category.key, rr.values[p.id]), isWinner: rr.winners.includes(p.id), folded: false};
-  };
-
-  const seatLeft = opponents[0] ? renderSeat(opponents[0], actingId, revealHoles, 'seat-left', checkedId===opponents[0].id, displayChips(opponents[0]), displayTally(opponents[0]), statFor(opponents[0])) : `<div class="seat-left"></div>`;
-  const seatRight = opponents[1] ? renderSeat(opponents[1], actingId, revealHoles, 'seat-right', checkedId===opponents[1].id, displayChips(opponents[1]), displayTally(opponents[1]), statFor(opponents[1])) : `<div class="seat-right"></div>`;
-
-  const currentCat = G.revealedCats[0];
-  const statCardHtml = currentCat
-    ? `<div class="id-card stat-card">
-        <div class="label">${currentCat.label}</div>
-        <div class="card-rule"></div>
-        <div class="icon">${currentCat.icon}</div>
-      </div>`
-    : `<div class="id-card stat-card hidden"><div class="icon">?</div></div>`;
-
-  const potJustBumped = lastAction && (lastAction.action==='call' || lastAction.action==='raise');
-
-  // One pip per round of the match: filled in for rounds already dealt, dim for what's ahead.
-  const pipsHtml = G.roundCats.map((c,i)=>{
-    const done = i < G.round-1 || (i===G.round-1 && G.stage!=='betting' && G.stage!=='idle');
-    const now = i===G.round-1 && !done;
-    return `<div class="pip ${done?'done':''} ${now?'now':''}"></div>`;
+  const rows = ordered.map(e => {
+    const tier = tierOf(e.pctOff);
+    const detail = e.pctOff === null
+      ? (e.guess === null ? 'no answer' : 'not a number')
+      : `${escapeHtml(e.value !== null ? formatRounded(e.value) : (e.guess ?? ''))}`;
+    return `<li class="row ${tier}">
+      <span class="who">
+        <span class="who-name">${escapeHtml(nameOf(e.playerId))}</span>
+        <span class="who-guess">${detail}</span>
+      </span>
+      <span class="dist mono">${scoreLabel(e.points, view)}</span>
+    </li>`;
   }).join('');
+  return `<ol class="closeness">${rows}</ol>`;
+}
 
-  // Busted players have their cards removed for the rest of the match, same as
-  // opponents — except once the match is over, when everyone's hand goes face-up.
-  const holeHtml = human.hole.length && (!human.eliminated || revealHoles) ? human.hole.map(pl=>`
-    <div class="id-card player-card">
-      ${PERSON_ICON}
-      <div class="card-rule"></div>
-      <div class="pname">${pl.name}</div>
-    </div>`).join('') : '';
+/**
+ * The true answer, large, shown where the player strip sits during a round result.
+ * @param {import('./trivia.js').RoundResult} r
+ */
+function answerBlock(r){
+  const unit = r.question.label ? ' ' + escapeHtml(r.question.label) : '';
+  return `<div class="answer-block"><span class="answer-label">The answer</span><span class="answer-big">${formatRounded(r.question.answer)}${unit}</span></div>`;
+}
 
-  const maxBet = currentMaxBet(G);
-  const need = human.folded ? 0 : maxBet - human.roundBet;
-  const callAmount = Math.min(need, human.chips); // what Call would actually cost, clamped to an all-in
-  const humanTurn = actingId===mySeatId && !human.folded && G.stage==='betting';
-  // If you folded this round, statFor(human) comes back null — scoreCategories never
-  // ran on you, so you're not in rr.values and there's no verdict to show. You can
-  // still privately see what your own hand would have scored, though: your own hole
-  // cards are never redacted from your own view (see viewFor in state.js), so this is
-  // computed straight from them client-side rather than added to G.roundResult — it
-  // never becomes part of the shared game state, so nobody else's client ever sees it,
-  // only yours.
-  const humanStat = statFor(human) || (() => {
-    const rr = G.roundResult;
-    // G.roundResult isn't cleared by startRound() — it's only ever overwritten when
-    // resolveRound() runs again, so during the *current* round's own betting phase it's
-    // still holding the *previous* round's result. Without this stage check, folding
-    // early in a round would show last round's category/value for a beat before this
-    // round even resolves — gate on the same reveal window statFor() uses.
-    if(!rr || !(G.stage==='round-result' || G.stage==='game-over') || !human.folded || human.hole.length!==2) return null;
-    const key = /** @type {keyof import('./data.js').NBAPlayer} */ (rr.category.key);
-    const value = /** @type {number} */(human.hole[0][key]) + /** @type {number} */(human.hole[1][key]);
-    return {text: fmtStat(rr.category.key, value), isWinner: false, folded: true};
-  })();
+/**
+ * The end-of-match review: every question in order, with its correct answer and each player's guess.
+ * Within a round, players are listed closest first, and players with no valid answer sit at the bottom.
+ * @param {ReturnType<typeof viewFor>} view
+ */
+function reviewHtml(view){
+  const nameOf = (/** @type {number} */ id) => view.players.find(p => p.id === id)?.name ?? '?';
+  const rounds = view.history.map(r => {
+    const ordered = r.entries.slice().sort((x, y) => {
+      const ax = x.pctOff ?? Infinity;
+      const ay = y.pctOff ?? Infinity;
+      return (ax - ay) || nameOf(x.playerId).localeCompare(nameOf(y.playerId));
+    });
+    const unit = r.question.label ? ' ' + escapeHtml(r.question.label) : '';
+    const guesses = ordered.map(e => {
+      const guessText = e.pctOff === null
+        ? (e.guess === null ? 'no answer' : 'not a number')
+        : escapeHtml(e.value !== null ? formatRounded(e.value) : (e.guess ?? ''));
+      return `<li class="review-guess ${tierOf(e.pctOff)}">
+        <span class="review-name">${escapeHtml(nameOf(e.playerId))}</span>
+        <span class="review-value mono">${guessText}</span>
+        <span class="review-pts mono">${scoreLabel(e.points, view)}</span>
+      </li>`;
+    }).join('');
+    return `
+      <article class="review-round">
+        <p class="review-question">${r.roundNum}. ${escapeHtml(r.question.text)}</p>
+        <p class="review-answer">Answer <b class="mono">${formatRounded(r.question.answer)}${unit}</b></p>
+        <ul class="review-guesses">${guesses}</ul>
+      </article>`;
+  }).join('');
+  return `
+    <section class="review">
+      <h2 class="review-title">Round by round</h2>
+      ${rounds}
+    </section>`;
+}
 
-  const minRaiseTo = maxBet+MIN_RAISE;
-  const maxRaiseTo = human.chips+human.roundBet;
-  // If a player's stack can't cover even the minimum legal raise, don't offer one —
-  // a slider whose min exceeds its max just freezes, undraggable, which is exactly
-  // the "raise slider doesn't work" bug this replaces.
-  const canRaise = maxRaiseTo >= minRaiseTo;
-  const raiseDefault = Math.min(minRaiseTo+MIN_RAISE, maxRaiseTo);
+/**
+ * Emoji for how close one guess was: a star for exact, green within 3%, orange within 10%, and a white
+ * square for anything further out or no answer.
+ * @param {number|null} pctOff
+ */
+function closenessEmoji(pctOff){
+  if(pctOff === null) return '⬜';
+  if(pctOff === 0) return '🏆';
+  if(pctOff <= 0.03) return '🟩';
+  if(pctOff <= 0.10) return '🟨';
+  return '⬜';
+}
 
-  let controlsHtml = '';
-  if(G.stage==='betting'){
-    // The bar's own countdown is driven entirely by CSS (a full-width-to-empty
-    // transition timed to ACTION_TIMEOUT_MS via the inline custom property below) — it's
-    // purely a visual echo of the actual clock enforced in requestAction() above; if the
-    // human acts first, this element just gets torn down with the rest of .controls on
-    // the next render, same as everything else here.
-    controlsHtml = humanTurn ? `
-      <div class="controls">
-        <div class="action-timer" style="--action-timeout:${ACTION_TIMEOUT_MS}ms"><div class="action-timer-bar"></div></div>
-        <div class="actions">
-          <button class="btn btn-fold" onclick="humanAction('fold')">Fold</button>
-          <button class="btn btn-call" onclick="humanAction('call')">${callAmount>0? 'Call $'+callAmount : 'Check'}</button>
-          ${canRaise ? `<button class="btn btn-raise" id="raiseBtn" onclick="doRaise()">Raise ${raiseDefault}</button>` : ''}
+// Keycap numbers 1 to 5, for the share text.
+const KEYCAPS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
+
+/**
+ * The daily score for the viewer: a percentage of the most points available, the round emojis, and the
+ * text used for sharing.
+ * @param {ReturnType<typeof viewFor>} view
+ */
+export function dailyResult(view){
+  const mine = view.history.map(r => r.entries.find(e => e.playerId === view.you));
+  const points = mine.reduce((sum, e) => sum + (e?.points ?? 0), 0);
+  // The total keeps one decimal place, e.g. 50.4%. Each round's percentage is whole.
+  const pct = Math.round((points / (ROUNDS * MAX_POINTS)) * 1000) / 10;
+  const emojis = mine.map(e => closenessEmoji(e?.pctOff ?? null)).join('');
+  const rounds = mine.map((e, i) => {
+    const roundPct = Math.round(((e?.points ?? 0) / MAX_POINTS) * 100);
+    return `${KEYCAPS[i] ?? ''} ${closenessEmoji(e?.pctOff ?? null)}${roundPct}%`;
+  });
+  const text = [
+    `Quantrivia #${dailyNumber()} — ${pct.toFixed(1)}%`,
+    '',
+    ...rounds,
+    '',
+    'quantrivia.com'
+  ].join('\n');
+  return { pct, emojis, text };
+}
+
+/** @param {ReturnType<typeof viewFor>} view */
+function dailySummaryHtml(view){
+  const { pct, emojis } = dailyResult(view);
+  return `
+    <div class="result-card daily-score">
+      <p class="daily-label">Daily score</p>
+      <p class="daily-pct mono">${pct.toFixed(1)}%</p>
+      <p class="daily-emojis" aria-label="Round results">${emojis}</p>
+      <div class="daily-actions">
+        <button class="btn" id="copyDailyBtn">Copy to clipboard</button>
+        <button class="btn primary" id="shareDailyBtn">Share with friends</button>
+      </div>
+    </div>`;
+}
+
+/**
+ * Place badge for the final standings. Places 1 to 3 get a gold, silver, or bronze medal with a blue
+ * ribbon, drawn to match the medal icon the game uses. Anything lower shows as a plain number.
+ * @param {number} place
+ */
+function placeBadge(place){
+  const tones = {
+    1: ['#f7c948', '#d9a21b'],
+    2: ['#d7dee6', '#9aa6b4'],
+    3: ['#d9965a', '#a8642e'],
+  };
+  const tone = tones[/** @type {1|2|3} */ (place)];
+  if(!tone) return `<span class="place-num">#${place}</span>`;
+  const [fill, edge] = tone;
+  return `<svg class="medal" viewBox="0 0 40 52" role="img" aria-label="${place} place">
+    <polygon points="8,0 17,0 24,20 15,20" fill="#3d8be8"/>
+    <polygon points="23,0 32,0 25,20 16,20" fill="#2a64c9"/>
+    <circle cx="20" cy="34" r="16" fill="${fill}" stroke="${edge}" stroke-width="2.5"/>
+    <circle cx="20" cy="34" r="11" fill="none" stroke="${edge}" stroke-width="1.5"/>
+    <text x="20" y="40" text-anchor="middle" font-family="Chakra Petch, Arial Black, sans-serif" font-size="14" fill="${edge}">${place}</text>
+  </svg>`;
+}
+
+/**
+ * @param {ReturnType<typeof viewFor>} view
+ * @param {{mode:'solo'|'multiplayer', deadline?: number|null, eloDeltas?: Record<string, number>|null, daily?: boolean}} opts
+ */
+function playingCard(view, opts){
+  const you = view.players.find(p => p.id === view.you);
+
+  if(view.stage === 'waiting' || !view.question){
+    return `<p class="status">Get ready…</p>`;
+  }
+
+  if(view.stage === 'question'){
+    return `<p class="status">Read the question…</p>`;
+  }
+
+  if(view.stage === 'guessing'){
+    const submittedCount = view.players.filter(p => p.submitted).length;
+    const canLock = parseNumber(draftText) !== null;
+    return `
+      <div class="guess-card">
+        ${timerBar()}
+        <div class="guess-head">
+          <span class="guess-prompt">Your answer</span>
         </div>
-        ${canRaise ? `<input type="range" class="raise-slider" id="raiseSlider" min="${minRaiseTo}" max="${maxRaiseTo}" step="1" value="${raiseDefault}" oninput="updateRaiseLabel(this.value)">` : ''}
-      </div>` : `<div class="controls"><div class="status-line">${human.eliminated ? "You're out — watching the rest of the match." : 'Waiting on other players…'}</div></div>`;
+        ${you?.submitted
+          ? `<p class="locked">Locked in: <b>${escapeHtml(view.yourGuess ?? 'no answer')}</b></p>`
+          : `<div class="answer-row">
+               <input id="numInput" type="text" inputmode="decimal" autocomplete="off" spellcheck="false"
+                 placeholder="Type a number" value="${escapeHtml(draftText)}">
+               <select id="unitSelect" aria-label="Unit">${unitOptions(draftUnit)}</select>
+             </div>
+             <div class="preview mono" id="preview">${escapeHtml(previewText())}</div>
+             <button class="btn primary" id="lockBtn" ${canLock ? '' : 'disabled'}>Lock in</button>`}
+        <div class="table-status mono">${submittedCount}/${view.players.length} locked in</div>
+      </div>`;
   }
 
-  // Replaces the old static "here's who won, click Next Round" popup: this is now just
-  // a category header — the actual per-player numbers live on each seat itself (see
-  // statFor/.seat-stat-pop above), so comparing them doesn't mean looking away from the
-  // table to a separate list and matching names back up. Holds for REVEAL_HOLD_MS, then
-  // (see the resultKey block below, once this HTML is actually in the DOM) the stat card
-  // flies to the winner's seat and — for solo — the match advances itself. No button,
-  // nothing to click.
-  let roundResultHtml = '';
-  if((G.stage==='round-result' || G.stage==='game-over') && G.roundResult){
-    const rr = G.roundResult;
-    roundResultHtml = `<div id="round-reveal">
-      <h3>${rr.category.icon} ${rr.category.label} — Round ${G.round}/${ROUNDS}</h3>
-      ${rr.uncontested ? `<p class="reveal-note">Uncontested — everyone else folded.</p>` : ''}
-    </div>`;
+  // After each round, the answer and every guess are shown. The daily has no countdown: it waits for the
+  // Next question button instead, which paintSolo adds.
+  if(view.stage === 'round-result' && view.lastResult){
+    return `
+      <div class="result-card">
+        ${opts.daily ? '' : timerBar()}
+        ${closenessList(view.lastResult, view)}
+      </div>`;
   }
 
-  let gameOverHtml = '';
-  if(G.stage==='game-over' && G.gameResult){
-    const gr = G.gameResult;
-    const winnerNames = gr.winners.map(id=>/** @type {import('./state.js').GamePlayer} */(G.players.find(p=>p.id===id)).name).join(' & ');
-    gameOverHtml = `<div id="game-over">
-      <h2>🏆 Game Over</h2>
-      <p>${G.players.map(p=>`${p.name}: ${displayTally(p).map(c=>c.icon).join('') || '—'}`).join(' &nbsp;|&nbsp; ')}</p>
-      <p><b>${winnerNames} win${gr.winners.length===1?'s':''} the match!</b></p>
-      ${mode==='solo'
-        ? `<button class="btn-next" onclick="renderStart()">New Game</button>`
-        : `<button class="btn-next" onclick="backToLobby()">Back to Lobby</button>`}
-    </div>`;
+  if(view.stage === 'game-over' && opts.daily){
+    return dailySummaryHtml(view);
   }
 
+  if(view.stage === 'game-over' && view.standings){
+    return `
+      <div class="result-card">
+        <h2 class="final-title">Final Results</h2>
+        <ul class="guess-list standings">
+          ${view.standings.map(s => `
+            <li class="${s.place === 1 ? 'win' : ''}">
+              <span class="g-rank">${placeBadge(s.place)}</span>
+              <span class="g-name">${escapeHtml(s.name)}</span>
+              ${eloCell(opts.eloDeltas, s.id)}
+            </li>`).join('')}
+        </ul>
+      </div>`;
+  }
+
+  return '';
+}
+
+/**
+ * Renders the whole game screen from a redacted view.
+ * @param {ReturnType<typeof viewFor>} view
+ * @param {{mode:'solo'|'multiplayer', deadline?: number|null, onGuess: (guess: import('./trivia.js').Guess) => void, extra?: string, eloDeltas?: Record<string, number>|null, daily?: boolean}} opts
+ */
+export function renderGame(view, opts){
+  // The tab bar and sidebar stay out of the way while a match is being played.
+  document.body.classList.toggle('in-game', view.stage !== 'waiting' && view.stage !== 'game-over');
+  // A new round starts with an empty input, so last round's number can't be submitted by accident.
+  // The question card drops in only when a new round arrives, not on every redraw within a round.
+  const newRound = view.roundNum !== lastRoundNum;
+  if(newRound){
+    lastRoundNum = view.roundNum;
+    resetDraft();
+  }
+  const app = /** @type {HTMLElement} */ (document.getElementById('app'));
   app.innerHTML = `
-    <div class="hud">
-      <div class="round-label">Round ${Math.min(G.round,ROUNDS)}/${ROUNDS} — Game #${G.gameNum}</div>
-      <div class="pip-row">${pipsHtml}</div>
+    <div class="table-top">
+      ${roundPips(view)}
+      <span class="round-label mono">Round ${Math.max(view.roundNum, 1)} / ${ROUNDS}</span>
     </div>
+    ${view.question && view.stage !== 'game-over' ? `<div class="question-card${newRound ? ' drop-in' : ''}"><p class="question">${escapeHtml(view.question.text)}</p></div>` : ''}
+    ${view.stage === 'round-result' && view.lastResult ? answerBlock(view.lastResult) : ''}
+    ${playingCard(view, opts)}
+    ${view.stage === 'game-over' ? reviewHtml(view) : ''}
+    ${opts.extra ?? ''}`;
 
-    <div class="table-area">
-      ${seatLeft}
-      <div class="center-column">
-        <div class="center-circle" aria-hidden="true"></div>
-        <div class="pot-banner">
-          <div class="pot-amount ${potJustBumped?'just-bumped':''}" id="potAmount">$${G.pot}</div>
-          <div class="pot-label">Pot</div>
-        </div>
-        ${statCardHtml}
-      </div>
-      ${seatRight}
-    </div>
-
-    <div class="you-seat ${human.folded?'folded':''} ${human.eliminated?'eliminated':''} ${checkedId===mySeatId?'just-checked':''}" data-seat="${mySeatId}">
-      ${checkedId===mySeatId ? `<div class="check-tap">✊</div>` : ''}
-      ${(human.eliminated && !revealHoles)
-        ? `<div class="spectator-tag">Spectator</div>`
-        : `<div class="seat-cards-row">
-            <div class="hole-cards ${lastAction && lastAction.playerId===mySeatId && lastAction.action==='fold' ? 'just-folded' : ''}">${holeHtml}</div>
-            ${humanStat ? `<div class="seat-stat-pop ${humanStat.isWinner?'winner':''} ${humanStat.folded?'folded-stat':''}">${humanStat.text}</div>` : ''}
-          </div>`}
-      <div class="you-header">
-        <div class="you-name">You${human.eliminated?' (spectator)':human.folded?' (folded)':''}</div>
-        <div class="cards-tally">${displayTally(human).map(c=>c.icon).join('')}</div>
-        <div class="you-chips chip-amount">$${displayChips(human)}</div>
-      </div>
-    </div>
-
-    ${controlsHtml}
-    ${roundResultHtml}
-    ${gameOverHtml}
-
-    <div class="log-strip">${G.log.map(l=>`<div>${l}</div>`).join('')}</div>`;
-
-  if(lastAction){
-    const seatSelector = `[data-seat="${lastAction.playerId}"] .chip-amount`;
-    if(lastAction.action==='call'){
-      flyChip(seatSelector);
-      popBetAmount(seatSelector, 'call', lastAction.amount);
-    } else if(lastAction.action==='raise'){
-      flyChip(seatSelector);
-      flyChip(seatSelector, RAISE_CHIP_STAGGER_MS);
-      popBetAmount(seatSelector, 'raise', lastAction.amount);
-    }
+  if(view.stage === 'guessing' && !view.players.find(p => p.id === view.you)?.submitted){
+    wireAnswer(opts);
   }
-
-  // Kick off the round-reveal's second beat — the stat card flying to the winner —
-  // once the first beat (each seat's own .seat-stat-pop, holding for REVEAL_HOLD_MS) has
-  // had its moment. Keyed by round+category rather than run unconditionally on every
-  // render, so a render that re-displays the *same* still-open round result (nothing
-  // else re-renders during this window in practice, but the guard costs nothing) never
-  // restarts or double-plays the flight.
-  if(G.roundResult && resultKey && (G.stage==='round-result' || G.stage==='game-over')){
-    if(resultKey !== lastRevealedResultKey){
-      lastRevealedResultKey = resultKey;
-      const winners = G.roundResult.winners;
-      setTimeout(()=>{
-        document.querySelectorAll('.seat-stat-pop').forEach(el=>el.classList.add('fading'));
-        flyStatCardToWinners(G, winners, resultKey);
-      }, REVEAL_HOLD_MS);
-    }
+  // Confetti only for the match winner, once, on the final standings.
+  if(view.stage === 'game-over' && confettiDone !== 'final'){
+    confettiDone = 'final';
+    if(view.standings?.find(s => s.id === view.you)?.place === 1) burstConfetti();
   }
+  if(view.stage === 'guessing'){
+    startTimer(opts.deadline ?? null, GUESS_TOTAL_MS);
+  } else if(view.stage === 'round-result' && !opts.daily){
+    // The server doesn't send a result deadline, so start the pause clock the first time this round's
+    // result is shown. The pause length is the same constant the match driver uses.
+    if(resultRound !== view.roundNum){
+      resultRound = view.roundNum;
+      resultStart = Date.now();
+    }
+    startTimer(resultStart + ROUND_RESULT_MS, ROUND_RESULT_MS);
+  } else {
+    if(timerFrame) cancelAnimationFrame(timerFrame);
+    timerFrame = null;
+  }
+}
+
+/** @param {ReturnType<typeof viewFor>} view */
+function roundPips(view){
+  const done = view.history.length;
+  // Yellow only once the round's guess window is open. Before that (waiting, question) and after it closes
+  // (round-result, game-over) there's no yellow pip: a finished round is blue, and the next one stays dim.
+  const now = view.stage === 'guessing' ? done : -1;
+  return `<div class="pips">${Array.from({length: ROUNDS}, (_, i) => {
+    const cls = i < done ? 'done' : i === now ? 'now' : '';
+    return `<span class="pip ${cls}"></span>`;
+  }).join('')}</div>`;
+}
+
+/**
+ * Wires the number box, unit dropdown, and lock button. Typing updates the draft and the preview in
+ * place, so the input keeps focus.
+ * @param {{onGuess: (guess: import('./trivia.js').Guess) => void}} opts
+ */
+function wireAnswer(opts){
+  const input = /** @type {HTMLInputElement|null} */ (document.getElementById('numInput'));
+  const unit = /** @type {HTMLSelectElement|null} */ (document.getElementById('unitSelect'));
+  const lock = /** @type {HTMLButtonElement|null} */ (document.getElementById('lockBtn'));
+  const preview = document.getElementById('preview');
+  if(!input || !unit || !lock) return;
+
+  const sync = () => {
+    lock.disabled = parseNumber(draftText) === null;
+    if(preview) preview.textContent = previewText();
+  };
+  const submit = () => {
+    if(parseNumber(draftText) === null) return;
+    opts.onGuess(makeGuess(draftText, draftUnit));
+  };
+
+  input.addEventListener('input', () => { draftText = input.value; sync(); });
+  input.addEventListener('keydown', e => { if(e.key === 'Enter') submit(); });
+  unit.addEventListener('change', () => { draftUnit = unit.value; sync(); });
+  lock.addEventListener('click', submit);
+}
+
+// A short burst of paper confetti from the top of the screen. The pieces are removed after they fall.
+function burstConfetti(){
+  const colors = ['#fffa0b', '#7acaf6', '#7c73c7', '#65c853', '#ffffff'];
+  const host = document.createElement('div');
+  host.className = 'confetti';
+  for(let i = 0; i < 60; i++){
+    const piece = document.createElement('span');
+    piece.className = 'confetti-piece';
+    piece.style.left = Math.random() * 100 + '%';
+    piece.style.background = colors[i % colors.length];
+    piece.style.animationDelay = Math.random() * 0.4 + 's';
+    piece.style.animationDuration = 1.8 + Math.random() * 1.4 + 's';
+    piece.style.setProperty('--drift', Math.random() * 200 - 100 + 'px');
+    piece.style.setProperty('--spin', Math.random() * 720 - 360 + 'deg');
+    host.appendChild(piece);
+  }
+  document.body.appendChild(host);
+  setTimeout(() => host.remove(), 3500);
+}
+
+/** @returns {string} The empty bar; startTimer() fills it in after the view is painted. */
+function timerBar(){
+  return '<div class="timer"><div class="timer-fill" id="timerFill"></div></div>';
+}
+
+// Drains the timer bar from full to empty between now and the deadline. The bar only reads time,
+// so it can't drift from the server's clock by more than the network delay.
+/**
+ * @param {number|null} deadline Epoch ms when the window closes.
+ * @param {number} total Length of the window in ms.
+ */
+function startTimer(deadline, total){
+  if(timerFrame) cancelAnimationFrame(timerFrame);
+  timerFrame = null;
+  if(!deadline) return;
+  // Runs once per screen frame rather than every 100ms, so the bar moves smoothly.
+  const tick = () => {
+    const fill = document.getElementById('timerFill');
+    if(!fill) return;
+    const left = Math.min(1, Math.max(0, (deadline - Date.now()) / total));
+    fill.style.transform = `scaleX(${left})`;
+    // Result-card bars keep their CSS colour; only the guessing bar changes colour as time runs out.
+    if(!fill.closest('.result-card')){
+      fill.style.background = left > 0.5 ? 'var(--green)' : left > 0.2 ? 'var(--yellow)' : 'var(--red)';
+    }
+    if(left > 0) timerFrame = requestAnimationFrame(tick);
+    else timerFrame = null;
+  };
+  tick();
+}
+
+/** Clears the number box and unit dropdown. Called at the start of each round. */
+export function resetDraft(){
+  draftText = '';
+  draftUnit = '';
+}
+
+// ---------- Solo: a local match against two CPU opponents ----------
+
+/** Resolves the human's pending answer wait early once they lock in. */
+/** @type {(() => void)|null} */
+let soloWake = null;
+/** Epoch ms when the current solo answer window closes, for the timer bar. */
+let soloDeadline = /** @type {number|null} */ (null);
+/** Resolves the daily's wait once the player presses Next question (or See results). */
+let soloNext = /** @type {(() => void)|null} */ (null);
+
+/**
+ * Starts a solo match. The human (id 0) plays alone against two CPU seats (ids 1 and 2). The same
+ * playGame() driver the server uses runs it here, with local timers and CPU answers.
+ */
+export async function startSolo(opts = {}){
+  resetDraft();
+  soloDaily = Boolean(opts.daily);
+  // The daily is a solo challenge: no CPU opponents, just you trying to score as many points as possible.
+  // It uses the same five questions for everyone on the same day.
+  const cpuNames = soloDaily ? [] : pickQuestions(CPU_NAMES.map(name => ({name})), 2).map(c => c.name);
+  const G = makeGame(
+    [{id: 0, name: 'You'}, ...cpuNames.map((name, i) => ({id: i + 1, name}))],
+    soloDaily ? 'closeness' : 'rank'
+  );
+  const questions = soloDaily
+    ? pickQuestions(QUESTIONS, ROUNDS, seededRandom(dailyKey()))
+    : pickQuestions(QUESTIONS, ROUNDS);
+  await playGame(G, {
+    questions,
+    render: () => paintSolo(G),
+    // The daily waits for the player after each round. Practice games use the timed pause instead.
+    awaitNext: soloDaily ? () => new Promise(resolve => { soloNext = resolve; paintSolo(G); }) : undefined,
+    botIds: cpuNames.map((_, i) => i + 1),
+    awaitGuesses: () => new Promise(resolve => {
+      // The daily has no clock: the round waits until you lock in. Practice games time out.
+      soloDeadline = soloDaily ? null : Date.now() + GUESS_TIME_MS;
+      const finish = () => {
+        if(timer) clearTimeout(timer);
+        soloWake = null;
+        soloDeadline = null;
+        resolve();
+      };
+      const timer = soloDaily ? null : setTimeout(finish, GUESS_TIME_MS);
+      soloWake = () => { if(G.guesses[0] !== undefined) finish(); };
+      paintSolo(G); // show the timer as soon as the window opens
+    })
+  });
+  paintSolo(G); // the match is over. The results screen stays up for the player to act on.
+}
+
+/** True while the solo game on screen is the daily challenge. */
+let soloDaily = false;
+
+/** @param {import('./trivia.js').GameState} G */
+function paintSolo(G){
+  const over = G.stage === 'game-over';
+  const view = viewFor(G, 0);
+  renderGame(view, {
+    mode: 'solo',
+    daily: soloDaily,
+    deadline: G.stage === 'guessing' ? soloDeadline : null,
+    onGuess: (guess) => {
+      if(!submitGuess(G, 0, guess)) return;
+      resetDraft(); // the answer now lives in G, and the pane shows it as locked
+      soloWake?.();
+      paintSolo(G);
+    },
+    extra: over
+      ? (soloDaily
+        ? `<a class="btn primary" href="/">Back to menu</a>`
+        : `<button class="btn primary" id="againBtn">Play again</button>`)
+      : (soloDaily && G.stage === 'round-result'
+        ? `<button class="btn primary" id="nextBtn">${G.roundNum === ROUNDS ? 'See results' : 'Next question'}</button>`
+        : '')
+  });
+  document.getElementById('nextBtn')?.addEventListener('click', () => {
+    const next = soloNext;
+    soloNext = null;
+    next?.();
+  });
+  if(over) document.getElementById('againBtn')?.addEventListener('click', () => { startSolo(); });
+  if(over && soloDaily){
+    document.getElementById('shareDailyBtn')?.addEventListener('click', () => { shareText(dailyResult(view).text); });
+    document.getElementById('copyDailyBtn')?.addEventListener('click', async (e) => {
+      const btn = /** @type {HTMLButtonElement} */ (e.currentTarget);
+      try{
+        await navigator.clipboard.writeText(dailyResult(view).text);
+        btn.textContent = 'Copied!';
+      } catch {
+        btn.textContent = 'Could not copy';
+      }
+    });
+  }
+}
+
+/** Pre-game screen for solo play. */
+export function renderStart(){
+  // "Play the Daily" on the menu opens this page with ?daily=1, so the daily game starts straight away.
+  if(new URLSearchParams(location.search).has('daily')){
+    startSolo({daily: true});
+    return;
+  }
+  const app = /** @type {HTMLElement} */ (document.getElementById('app'));
+  app.innerHTML = `
+    <div class="start-card">
+      <p class="sub">Five trivia questions. Closest answer wins each round.</p>
+      <button class="btn primary" id="soloBtn">Start match</button>
+      <p class="hint">You against two CPUs. Type a number and pick a unit, from hundred up to quadrillion.</p>
+    </div>`;
+  document.getElementById('soloBtn')?.addEventListener('click', () => startSolo());
+}
+
+/**
+ * Shares plain text, such as a daily result, with the same iPhone-first behaviour as shareLink.
+ * @param {string} text
+ */
+export async function shareText(text){
+  if(navigator.share){
+    try{
+      await navigator.share({title: 'Quantrivia', text});
+    } catch {
+      // The player closed the share sheet. Nothing to do.
+    }
+    return;
+  }
+  location.href = `sms:&body=${encodeURIComponent(text)}`;
+}
+
+/**
+ * Shares a link. On iPhone the share sheet includes Messages, so that's the first choice. Where
+ * sharing isn't available, open a Messages draft with the text and link already in it.
+ * @param {string} text
+ * @param {string} url
+ */
+export async function shareLink(text, url){
+  if(navigator.share){
+    try{
+      await navigator.share({title: 'Quantrivia', text, url});
+    } catch {
+      // The player closed the share sheet. Nothing to do.
+    }
+    return;
+  }
+  location.href = `sms:&body=${encodeURIComponent(`${text}: ${url}`)}`;
 }

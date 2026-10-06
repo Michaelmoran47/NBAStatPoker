@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Accounts + static-file server for NBA Stat Poker (Phase 1 of multiplayer).",
+  "description": "a numbers based trivia game",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

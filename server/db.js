@@ -7,6 +7,7 @@ import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { START_ELO } from '../js/trivia.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.join(__dirname, 'data');
@@ -39,3 +40,50 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
+
+// One row per pair of users. user_a is always the smaller id, so the UNIQUE constraint
+// makes "A and B" and "B and A" the same row: a pair can never have two friendships, and
+// a request can't be filed twice in opposite directions. status 'pending' is a request
+// waiting on user_b (or user_a) to accept; requested_by says which of the two sent it.
+// Friendship is mutual once 'accepted'. See server/social.js.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS friendships (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_a INTEGER NOT NULL REFERENCES users(id),
+    user_b INTEGER NOT NULL REFERENCES users(id),
+    status TEXT NOT NULL CHECK (status IN ('pending','accepted')),
+    requested_by INTEGER NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (user_a, user_b),
+    CHECK (user_a < user_b)
+  );
+  CREATE INDEX IF NOT EXISTS friendships_user_b ON friendships(user_b);
+
+  -- A challenge sent to one friend, pointing at a waiting room. Shown on their home menu for a while.
+  CREATE TABLE IF NOT EXISTS challenges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_user INTEGER NOT NULL REFERENCES users(id),
+    to_user INTEGER NOT NULL REFERENCES users(id),
+    room_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- One invite code per player, fixed for life, so a link already shared keeps working.
+  -- Used by the sign-up page (server/auth.js) to make the new player friends with the inviter.
+  CREATE TABLE IF NOT EXISTS invite_codes (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id),
+    code TEXT NOT NULL UNIQUE
+  );
+`);
+
+// Added after the original tables so an existing app.db (from before ELO existed) gets
+// the new columns too. CREATE TABLE IF NOT EXISTS alone would leave old databases missing
+// them. ALTER TABLE ... ADD COLUMN is guarded by a PRAGMA check because SQLite has no
+// "ADD COLUMN IF NOT EXISTS".
+/** @param {string} table @param {string} column @param {string} definition */
+function addColumnIfMissing(table, column, definition){
+  const cols = /** @type {{name:string}[]} */ (db.prepare(`PRAGMA table_info(${table})`).all());
+  if(!cols.some(c => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+addColumnIfMissing('users', 'elo', `INTEGER NOT NULL DEFAULT ${START_ELO}`);
+addColumnIfMissing('match_results', 'elo_delta', 'INTEGER');

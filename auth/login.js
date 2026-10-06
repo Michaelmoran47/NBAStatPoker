@@ -5,8 +5,10 @@
 
 const app = /** @type {HTMLElement} */ (document.getElementById('app'));
 
+// A friend's invite link (?invite=CODE) opens straight to the sign-up form and carries the code along.
+const inviteCode = new URLSearchParams(location.search).get('invite');
 /** @type {'login'|'signup'} */
-let mode = 'login';
+let mode = inviteCode || new URLSearchParams(location.search).get('mode') === 'signup' ? 'signup' : 'login';
 /** @type {string} */
 let error = '';
 /** @type {{username:string}|null} */
@@ -27,27 +29,30 @@ async function loadConfig(){
   if(!me) render(); // only re-render the logged-out screen; the "signed in" screen has no button to add
 }
 
+/**
+ * Where to go after signing in: the ?next= page (an invite link, say), or the main menu. Only paths
+ * on this site are allowed, so the link can't send the player to another site.
+ */
+function nextPath(){
+  const next = new URLSearchParams(location.search).get('next') ?? '/';
+  return next.startsWith('/') && !next.startsWith('//') ? next : '/';
+}
+
 function render(){
+  // Signed-in players go to the main menu, so this page only ever shows the sign-in form.
   if(me){
-    app.innerHTML = `
-      <div class="id-card auth-card">
-        <h1 class="auth-title">🏀 NBA Stat Poker</h1>
-        <p class="auth-status">Signed in as <b>${escapeHtml(me.username)}</b></p>
-        <a class="btn-next" href="../solo.html" style="text-align:center; text-decoration:none; display:block;">Play Solo</a>
-        <a class="btn-next" href="../lobby/lobby.html" style="text-align:center; text-decoration:none; display:block;">Multiplayer Lobby</a>
-        <button class="btn-next" id="logoutBtn" style="background:transparent; box-shadow:none; border:1.5px solid rgba(0,0,0,.3); color:var(--ink);">Log Out</button>
-      </div>`;
-    document.getElementById('logoutBtn')?.addEventListener('click', async ()=>{
-      await fetch('/api/logout', {method:'POST'});
-      me = null;
-      render();
-    });
+    location.replace(nextPath());
     return;
   }
 
   app.innerHTML = `
-    <form class="id-card auth-card" id="authForm">
-      <h1 class="auth-title">🏀 NBA Stat Poker</h1>
+    <form class="start-card auth-card" id="authForm">
+      <svg class="auth-logo" viewBox="0 0 120 120" role="img" aria-label="Quantrivia logo">
+        <circle cx="56" cy="56" r="30" fill="none" stroke="#fffa0b" stroke-width="13"/>
+        <path d="M76 78 L94 98" stroke="#fffa0b" stroke-width="13" stroke-linecap="round"/>
+        <circle cx="56" cy="56" r="6" fill="#7acaf6"/>
+      </svg>
+      <h1 class="auth-title">Quantrivia</h1>
       <div class="auth-tabs">
         <div class="auth-tab ${mode==='login'?'active':''}" data-mode="login">Log In</div>
         <div class="auth-tab ${mode==='signup'?'active':''}" data-mode="signup">Sign Up</div>
@@ -63,8 +68,9 @@ function render(){
           required minlength="8">
       </div>
       <div class="auth-error">${escapeHtml(error)}</div>
-      <button type="submit" class="btn-next">${mode==='login'?'Log In':'Create Account'}</button>
+      <button type="submit" class="btn primary">${mode==='login'?'Log In':'Create Account'}</button>
       ${mode==='signup' ? '<div class="auth-hint">Passwords need at least 8 characters.</div>' : ''}
+      ${mode==='signup' && inviteCode ? '<div class="auth-hint">A friend invited you. You\'ll be friends as soon as you sign up.</div>' : ''}
       ${googleClientId ? `
         <div class="auth-divider">or</div>
         <div id="googleSignInDiv"></div>
@@ -95,7 +101,7 @@ async function handleSubmit(e){
   const res = await fetch(`/api/${mode==='login' ? 'login' : 'signup'}`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({username, password})
+    body: JSON.stringify(mode === 'signup' && inviteCode ? {username, password, invite: inviteCode} : {username, password})
   });
   const body = await res.json();
 

@@ -1,11 +1,8 @@
 // @ts-check
-// Entry point. The HTML template strings in ui.js use inline onclick="..." handlers
-// (simplest thing that works for a server-rendered-string UI), so the functions they
-// call need to exist as globals — bridge them here rather than scattering `window.x =`
-// assignments through ui.js.
+// Entry point for the solo page. The game's HTML is built by ui.js with event listeners, so
+// nothing needs to be exposed on window.
+import { renderStart } from './ui.js';
+import { mountChrome } from '../social/chrome.js';
 
-import { renderStart, startGame, humanAction, doRaise, updateRaiseLabel, nextRound } from './ui.js';
-
-Object.assign(window, { renderStart, startGame, humanAction, doRaise, updateRaiseLabel, nextRound });
-
+mountChrome({active: null, title: 'Solo', back: '/'});
 renderStart();

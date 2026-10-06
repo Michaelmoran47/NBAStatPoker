@@ -3,37 +3,41 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NBA Stat Poker — Sign In</title>
+<title>Quantrivia — Sign In</title>
 <link rel="stylesheet" href="../css/style.css">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
+  /* Starts just under the top bar. Centring vertically in 100vh pushed the card down, since the top bar takes space too. */
   .auth-wrap{
-    width:100%; min-height:100vh; display:flex; flex-direction:column;
-    align-items:center; justify-content:center; gap:10px;
+    width:100%; display:flex; flex-direction:column;
+    align-items:center; justify-content:flex-start; gap:10px; padding-top:24px;
   }
   .home-link{ color:var(--muted); font-size:.8em; text-decoration:none; }
   .home-link:hover{ color:var(--text); }
   .auth-card{
-    width:min(90vw, 340px);
+    width:min(90vw, 340px); margin:0 auto;
     padding:28px 26px 26px;
     display:flex; flex-direction:column; align-items:stretch; gap:14px;
   }
+  .auth-logo{ width:72px; height:72px; margin:0 auto; }
   .auth-title{
     font-family:var(--font-display); font-stretch:condensed; font-weight:800;
     text-transform:uppercase; letter-spacing:.03em; font-size:1.3em;
     text-align:center; margin:0;
   }
   .auth-tabs{ display:flex; gap:8px; }
+  /* The card is dark navy, so its text is light. Only the input fields keep dark text on white. */
+  .auth-card{ color:var(--text); }
   .auth-tab{
     flex:1; text-align:center; padding:8px; border-radius:10px; cursor:pointer;
     font-family:var(--font-display); font-stretch:condensed; font-weight:800;
     letter-spacing:.03em; text-transform:uppercase; font-size:.85em;
-    border:1.5px solid rgba(0,0,0,.35); background:rgba(0,0,0,.06); color:var(--ink);
+    border:1.5px solid var(--muted); background:transparent; color:var(--text);
   }
-  .auth-tab.active{ background:var(--gold); }
+  .auth-tab.active{ background:var(--accent); border-color:var(--accent); color:var(--ink); }
   .auth-field{ display:flex; flex-direction:column; gap:4px; }
   .auth-field label{
-    font-size:.78em; font-weight:700; color:var(--ink); opacity:.75;
+    font-size:.78em; font-weight:700; color:var(--text); opacity:.85;
     text-transform:uppercase; letter-spacing:.04em;
   }
   .auth-field input{
@@ -41,23 +45,26 @@
     border-radius:8px; border:1.5px solid rgba(0,0,0,.3); background:#fff; color:var(--ink);
   }
   .auth-error{
-    color:#832e26; font-size:.85em; font-weight:600; text-align:center; min-height:1.2em;
+    color:#ff8a8a; font-size:.85em; font-weight:600; text-align:center; min-height:1.2em;
   }
-  .auth-hint{ color:var(--ink); opacity:.6; font-size:.75em; text-align:center; }
-  .auth-status{ color:var(--ink); text-align:center; }
+  .auth-hint{ color:var(--muted); font-size:.75em; text-align:center; }
+  .auth-status{ color:var(--text); text-align:center; }
   .auth-divider{
-    display:flex; align-items:center; gap:10px; color:var(--ink); opacity:.5;
+    display:flex; align-items:center; gap:10px; color:var(--muted);
     font-size:.78em; text-transform:uppercase; letter-spacing:.04em;
   }
-  .auth-divider::before, .auth-divider::after{ content:''; flex:1; height:1px; background:rgba(0,0,0,.2); }
+  .auth-divider::before, .auth-divider::after{ content:''; flex:1; height:1px; background:rgba(255,255,255,.2); }
   #googleSignInDiv{ display:flex; justify-content:center; }
 </style>
 </head>
 <body>
 <div class="auth-wrap">
-  <a class="home-link" href="../index.html">← Home</a>
   <div id="app"></div>
 </div>
+<script type="module">
+  import { mountChrome } from '../social/chrome.js';
+  mountChrome({active: null, title: 'Sign in', back: '/', tabs: false, sidebar: false});
+</script>
 <script type="module" src="login.js"></script>
 </body>
 </html>

@@ -10,6 +10,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { authRouter } from './auth.js';
+import { socialRouter } from './social.js';
 import { attachWebSocketServer } from './ws.js';
 import { db } from './db.js'; // creates the DB file + tables on first run, as a side effect
 import { SqliteSessionStore } from './session-store.js';
@@ -29,6 +30,9 @@ if (!sessionSecret) {
 }
 
 const app = express();
+// Behind Traefik the real client address arrives in X-Forwarded-For. Trust that one proxy hop so rate limits
+// count each player's own address, not the proxy's.
+app.set('trust proxy', 1);
 
 // Built once and reused for both regular HTTP requests and the WebSocket upgrade
 // below, so a socket's session is always exactly the same session its HTTP requests
@@ -52,6 +56,7 @@ app.use(express.json());
 app.use(sessionMiddleware);
 
 app.use('/api', authRouter);
+app.use('/api', socialRouter);
 
 // Public, non-secret config the client needs — a Google OAuth Client ID is meant to
 // be visible in client-side code (unlike a client secret, which this app never uses
@@ -72,7 +77,7 @@ app.get('/api/config', (req, res) => {
 // only these specific directories — everything an actual page ever references, per every
 // href="…"/src="…" in index.html, solo.html, auth/login.html, and lobby/lobby.html — are
 // mounted, each under its own path.
-for (const dir of ['css', 'js', 'auth', 'lobby']) {
+for (const dir of ['css', 'js', 'auth', 'lobby', 'social']) {
   app.use(`/${dir}`, express.static(path.join(projectRoot, dir)));
 }
 for (const file of ['index.html', 'solo.html']) {
@@ -86,5 +91,5 @@ const httpServer = http.createServer(app);
 attachWebSocketServer(httpServer, sessionMiddleware);
 
 httpServer.listen(PORT, () => {
-  console.log(`NBA Stat Poker server running at http://localhost:${PORT}`);
+  console.log(`Quantrivia server running at http://localhost:${PORT}`);
 });
