@@ -61,6 +61,11 @@ function render(){
         <label for="username">Username</label>
         <input id="username" name="username" autocomplete="username" required minlength="1">
       </div>
+      ${mode==='signup' ? `
+      <div class="auth-field">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="email" required>
+      </div>` : ''}
       <div class="auth-field">
         <label for="password">Password</label>
         <input id="password" name="password" type="password"
@@ -69,7 +74,8 @@ function render(){
       </div>
       <div class="auth-error">${escapeHtml(error)}</div>
       <button type="submit" class="btn primary">${mode==='login'?'Log In':'Create Account'}</button>
-      ${mode==='signup' ? '<div class="auth-hint">Passwords need at least 8 characters.</div>' : ''}
+      ${mode==='login' ? '<a class="auth-hint" href="forgot.html">Forgot password?</a>' : ''}
+      ${mode==='signup' ? '<div class="auth-hint">Passwords need at least 8 characters. Your email is only used for password resets and reports, never shown to other players.</div>' : ''}
       ${mode==='signup' && inviteCode ? '<div class="auth-hint">A friend invited you. You\'ll be friends as soon as you sign up.</div>' : ''}
       ${googleClientId ? `
         <div class="auth-divider">or</div>
@@ -97,11 +103,16 @@ async function handleSubmit(e){
   const form = /** @type {HTMLFormElement} */ (e.target);
   const username = /** @type {HTMLInputElement} */ (form.elements.namedItem('username')).value;
   const password = /** @type {HTMLInputElement} */ (form.elements.namedItem('password')).value;
+  const email = mode === 'signup'
+    ? /** @type {HTMLInputElement} */ (form.elements.namedItem('email')).value
+    : undefined;
 
   const res = await fetch(`/api/${mode==='login' ? 'login' : 'signup'}`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(mode === 'signup' && inviteCode ? {username, password, invite: inviteCode} : {username, password})
+    body: JSON.stringify(mode === 'signup'
+      ? {username, password, email, ...(inviteCode ? {invite: inviteCode} : {})}
+      : {username, password})
   });
   const body = await res.json();
 

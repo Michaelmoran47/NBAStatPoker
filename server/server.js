@@ -10,6 +10,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { authRouter } from './auth.js';
+import { passwordResetRouter } from './password-reset.js';
+import { reportsRouter } from './reports.js';
 import { socialRouter } from './social.js';
 import { attachWebSocketServer } from './ws.js';
 import { adminRouter } from './question-stats.js';
@@ -57,6 +59,8 @@ app.use(express.json());
 app.use(sessionMiddleware);
 
 app.use('/api', authRouter);
+app.use('/api', passwordResetRouter);
+app.use('/api', reportsRouter);
 app.use('/api', socialRouter);
 app.use(adminRouter); // owner-only stats page and data, see server/question-stats.js
 

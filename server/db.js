@@ -89,6 +89,39 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS question_answers_question ON question_answers(question_id);
 `);
 
+// A password-reset link's token, stored as a SHA-256 hash rather than the raw token — the same
+// reasoning as hashing passwords with bcrypt: a database leak alone shouldn't hand out working
+// reset links. used_at is set the moment a token is spent (or superseded by a newer request), so
+// each token works at most once. See server/password-reset.js.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS password_resets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    token_hash TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS password_resets_token ON password_resets(token_hash);
+`);
+
+// A player reporting another player. Usernames are snapshotted at report time (alongside the ids)
+// so the report still reads sensibly even if someone involved later renames or deletes their account.
+// There's no in-app admin view for these yet — see server/reports.js, which also emails each one to
+// the operator's contact address.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reporter_id INTEGER NOT NULL REFERENCES users(id),
+    reported_id INTEGER NOT NULL REFERENCES users(id),
+    reporter_username TEXT NOT NULL,
+    reported_username TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    details TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
 // Added after the original tables so an existing app.db (from before ELO existed) gets
 // the new columns too. CREATE TABLE IF NOT EXISTS alone would leave old databases missing
 // them. ALTER TABLE ... ADD COLUMN is guarded by a PRAGMA check because SQLite has no

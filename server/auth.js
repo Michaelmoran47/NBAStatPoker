@@ -22,12 +22,12 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const googleClient = new OAuth2Client();
 
 const insertUser = db.prepare(
-  'INSERT INTO users (username, password_hash) VALUES (?, ?)'
+  'INSERT INTO users (username, password_hash, email) VALUES (?, ?, ?)'
 );
 const insertGoogleUser = db.prepare(
   'INSERT INTO users (username, google_id, email) VALUES (?, ?, ?)'
 );
-const findEloByUserId = db.prepare('SELECT elo FROM users WHERE id = ?');
+const findAccountById = db.prepare('SELECT elo, email, password_hash FROM users WHERE id = ?');
 const findUserByUsername = db.prepare(
   'SELECT id, username, password_hash FROM users WHERE username = ?'
 );
@@ -37,6 +37,17 @@ const findUserByGoogleId = db.prepare(
 const usernameExists = db.prepare(
   'SELECT 1 FROM users WHERE username = ?'
 );
+// Only password accounts need a unique email — it's how forgot-password finds the right
+// account. A Google-only account's email comes from Google and isn't checked against this.
+const passwordEmailExists = db.prepare(
+  'SELECT 1 FROM users WHERE email = ? AND password_hash IS NOT NULL'
+);
+const passwordEmailExistsForOther = db.prepare(
+  'SELECT 1 FROM users WHERE email = ? AND password_hash IS NOT NULL AND id != ?'
+);
+const updateEmail = db.prepare('UPDATE users SET email = ? WHERE id = ?');
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const emailChangeLimit = limitRoute(createLimiter({max: 10, windowMs: 60 * 60 * 1000}), userOrIp, 'Too many changes. Try again later.');
 
 export const authRouter = Router();
 
@@ -46,7 +57,7 @@ const insertAcceptedFriendship = db.prepare(
 );
 
 authRouter.post('/signup', signupLimit, async (req, res) => {
-  const { username, password, invite } = req.body ?? {};
+  const { username, password, email, invite } = req.body ?? {};
 
   if (typeof username !== 'string' || username.trim().length === 0) {
     return res.status(400).json({ error: 'Username is required.' });
@@ -54,15 +65,22 @@ authRouter.post('/signup', signupLimit, async (req, res) => {
   if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
     return res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
   }
+  if (typeof email !== 'string' || !EMAIL_PATTERN.test(email.trim())) {
+    return res.status(400).json({ error: 'A valid email is required (used only for password resets and reports).' });
+  }
 
   const cleanUsername = username.trim();
+  const cleanEmail = email.trim();
 
   if (findUserByUsername.get(cleanUsername)) {
     return res.status(409).json({ error: 'That username is already taken.' });
   }
+  if (passwordEmailExists.get(cleanEmail)) {
+    return res.status(409).json({ error: 'That email is already registered to an account.' });
+  }
 
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-  const info = insertUser.run(cleanUsername, passwordHash);
+  const info = insertUser.run(cleanUsername, passwordHash, cleanEmail);
   const newUserId = /** @type {number} */ (info.lastInsertRowid);
 
   // A friend's invite link makes the new player friends with the inviter straight away. A bad or old
@@ -117,8 +135,53 @@ authRouter.get('/me', (req, res) => {
   if (!req.session.username) {
     return res.status(401).json({ error: 'Not logged in.' });
   }
-  const row = /** @type {{elo:number}|undefined} */ (findEloByUserId.get(req.session.userId));
-  res.json({ username: req.session.username, elo: row?.elo ?? START_ELO });
+  const row = /** @type {{elo:number, email:string|null, password_hash:string|null}|undefined} */ (
+    findAccountById.get(req.session.userId)
+  );
+  res.json({
+    username: req.session.username,
+    elo: row?.elo ?? START_ELO,
+    email: row?.email ?? null,
+    hasPassword: !!row?.password_hash
+  });
+});
+
+// POST /api/account/email {email, currentPassword?} — lets a signed-in player add or change the
+// email used for password resets. A password account must confirm its current password first, so a
+// hijacked session alone can't be used to quietly take over password reset; a Google-only account has
+// no password to confirm, so it's skipped for them.
+authRouter.post('/account/email', emailChangeLimit, async (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Not logged in.' });
+  }
+  const { email, currentPassword } = req.body ?? {};
+
+  if (typeof email !== 'string' || !EMAIL_PATTERN.test(email.trim())) {
+    return res.status(400).json({ error: 'A valid email is required.' });
+  }
+  const cleanEmail = email.trim();
+
+  const account = /** @type {{password_hash:string|null}|undefined} */ (
+    db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.session.userId)
+  );
+  if (!account) {
+    return res.status(401).json({ error: 'Not logged in.' });
+  }
+  if (account.password_hash) {
+    if (typeof currentPassword !== 'string') {
+      return res.status(400).json({ error: 'Your current password is required.' });
+    }
+    const matches = await bcrypt.compare(currentPassword, account.password_hash);
+    if (!matches) {
+      return res.status(401).json({ error: 'Incorrect current password.' });
+    }
+  }
+  if (passwordEmailExistsForOther.get(cleanEmail, req.session.userId)) {
+    return res.status(409).json({ error: 'That email is already registered to another account.' });
+  }
+
+  updateEmail.run(cleanEmail, req.session.userId);
+  res.json({ email: cleanEmail });
 });
 
 // The client posts the ID token it got back from Google's "Sign in with Google"

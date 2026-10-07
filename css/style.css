@@ -508,6 +508,13 @@ body.in-game.has-tabs{ padding-bottom:16px; }
 .cc-form{ display:flex; gap:8px; }
 .cc-input{ flex:1; min-width:0; height:46px; border-radius:999px; border:2px solid var(--card-2); background:var(--card); color:var(--text); padding:0 16px; font:600 15px var(--font-body); }
 .cc-input:focus{ outline:none; border-color:var(--accent); }
+/* A pill shape (border-radius:999px) only reads right on a single-line input — selects and
+   textareas get a less extreme radius and their own height instead of the fixed 46px. */
+select.cc-input{ border-radius:14px; height:46px; }
+textarea.cc-input{ border-radius:14px; height:auto; padding:10px 16px; resize:vertical; }
+
+.cc-field{ display:flex; flex-direction:column; gap:6px; text-align:left; }
+.cc-field label{ font-size:.75em; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
 
 .cc-list{ display:flex; flex-direction:column; }
 .cc-row{ display:flex; align-items:center; gap:12px; padding:10px 2px; border-bottom:1px solid var(--card-2); }

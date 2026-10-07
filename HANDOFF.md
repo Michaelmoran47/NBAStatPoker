@@ -23,13 +23,30 @@ Social: profiles, friends (request, accept, decline, remove), a friends leaderbo
 - DNS is on **Cloudflare** (nameservers switched over from the registrar). SSL/TLS is handled free via Cloudflare + Let's Encrypt/Traefio on the VPS side — no paid SSL product needed.
 - **Cloudflare Email Routing** forwards `contact@playquantrivia.com` → the user's personal Gmail. This is forwarding-only (no outbound SMTP), and is intentionally left this way for now — the user plans to create a dedicated `quantrivia@gmail.com` later for manual replies and repoint the routing destination then. Not urgent, not done yet.
 - **Resend** is set up for transactional/automated email (password reset, report notifications, etc.) — domain verified via Cloudflare's "Auto configure" (CNAME `send`/`rsend` → `*.forge.rmta.net`, plus a DKIM TXT record). **Resend confirmed fully verified as of this session.**
-- **Still needed:** add `RESEND_API_KEY` to `server/.env` (user's action — check if done before building anything that sends mail). Password reset and the player-reporting feature are **not built yet**; they're blocked on this key existing in the server's env.
+- `RESEND_API_KEY` is now in `server/.env` and confirmed working (test emails sent successfully). Password reset is built (see below). The player-reporting feature is **still not built** — same Resend plumbing (`server/email.js`) can be reused for it.
 
-## Privacy, Terms, and reporting
+## Password reset (built this session)
 
-- `privacy.html` and `terms.html` added at repo root, served via the static-file allowlist in `server/server.js` (add any new top-level page there or it 404s). Operator is named as Michael Moran (no registered business); contact is `contact@playquantrivia.com`. Privacy policy includes a bullet on the anonymous per-question answer stats collection (see below).
+- `server/email.js` — a thin wrapper around Resend's HTTP API using Node's built-in `fetch` (no new npm dependency). Reads `RESEND_API_KEY` and `FROM_EMAIL` from env; if the key is missing it just logs instead of sending, so local dev without a key doesn't crash.
+- `server/password-reset.js` — `POST /api/forgot-password` and `POST /api/reset-password`, mounted in `server/server.js`. Tokens are 32 random bytes, stored only as a SHA-256 hash in the new `password_resets` table (`server/db.js`) — same reasoning as bcrypt-hashing passwords, a DB leak alone shouldn't hand out usable reset links. Tokens expire after 30 minutes and are single-use; a new request invalidates any earlier unused token for that account. The forgot-password response is deliberately identical whether or not the email matches an account, to avoid leaking which emails are registered.
+- Signup (`server/auth.js`) now requires and stores an email — there was previously no email column populated for password accounts (only Google accounts had one), and reset needs somewhere to send to. Email must be unique **among password accounts** (checked at signup); Google accounts aren't included in that check.
+- New pages: `auth/forgot.html`/`forgot.js` (request a link) and `auth/reset.html`/`reset.js` (set a new password from the token in the emailed link). Both are served automatically since `/auth` is already a mounted static dir — no allowlist change needed. Login page got a "Forgot password?" link.
+- **`BASE_URL` matters and is easy to get wrong.** It's used to build the link inside the reset email. Locally it must be `http://localhost:5500`; **on the real VPS deploy, it must be changed to `https://playquantrivia.com` in that server's own `.env`** — mixing these up sends an email with a link to a server that doesn't exist yet (this happened once already this session: `server/.env` had the production URL while testing locally, producing a reset email pointing at the live domain with nothing deployed there, which looked like "the server is down"). Check this value specifically whenever debugging a reset link that doesn't load.
+- `jsconfig.json` gained `"moduleDetection": "force"` — needed once more than one script-style (no import/export) file existed under `auth/`, otherwise tsc treated them as sharing one global scope and falsely flagged `app`/`error` redeclaration errors across `login.js`, `forgot.js`, `reset.js`. It also gained `social/**/*.js` in `include` — that whole directory had never actually been type-checked before (nothing in the checked dirs imports it), which is how `social/social.js` existed for a while with zero type-check coverage. Worth remembering if another top-level client dir (e.g. a future one) gets added — it needs adding to `include` explicitly, tsc won't pick it up on its own.
+- **Verified end-to-end this session**, including a real email delivered to the operator's own Gmail (not just a local mock) and the "wrong `BASE_URL`" failure mode above, which actually happened and was fixed live.
+
+## Account settings — add/change email (built this session)
+
+- New page: `auth/settings.html`/`settings.js`. Linked from a player's own profile (the "This is you" view in `social/social.html` now shows "Account settings" instead of no action at all).
+- `POST /api/account/email` in `server/auth.js` lets a signed-in player set or change their email. **Requires their current password to confirm the change** if the account has one (Google-only accounts skip this, since they have no password to check) — this wasn't explicitly asked for but is a deliberate security choice: without it, a stolen session cookie alone could silently redirect password-reset emails to an attacker's address. `GET /api/me` now also returns `email` and `hasPassword` so the settings page (and anything else) can tell what to show.
+- This is what makes password reset actually usable by **anyone who signed up before this session** — those accounts have no email on file (see above) and were otherwise stuck.
+
+## Privacy, Terms, and player reporting (built this session)
+
+- `privacy.html` and `terms.html` added at repo root, served via the static-file allowlist in `server/server.js` (add any new top-level page there or it 404s). Operator is named as Michael Moran (no registered business); contact is `contact@playquantrivia.com`. Privacy policy includes a bullet on the anonymous per-question answer stats collection (see above, admin stats section).
 - Linked from `auth/login.html`'s new footer. **Not yet linked from other pages** (landing/menu) — worth doing before launch.
-- Player reporting feature itself is not built — waiting on Resend key, same as password reset.
+- **Reporting is built.** A "Report" link on any other player's profile (`social/social.html`) opens a dialog (reason dropdown + optional free-text details) that posts to `POST /api/reports` (`server/reports.js`). Each report is both saved to a new `reports` table (`server/db.js` — reporter/reported ids *and* a username snapshot of each, so it still reads sensibly after a rename or account deletion) and emailed via `server/email.js` to `REPORT_EMAIL` (defaults to `contact@playquantrivia.com`, which is already forwarding to the operator's personal Gmail per the DNS/email setup above). Rate-limited to 10 reports/hour per account; you can't report yourself (enforced both server-side and by the UI, which shows "Account settings" instead of "Report" on your own profile).
+- **There's no in-app admin view for reports** — the email is the only way they're surfaced today. The `reports` table exists mainly so a report isn't lost if the email bounces; querying it directly (`sqlite3`/a one-off script) is the only way to review history right now. Worth a glance from the admin stats page's author if report volume ever gets high enough to need triage.
 
 ## `server/env.js` — a real bug, worth knowing about
 
@@ -162,21 +179,23 @@ There's no test suite in the repo itself.
 
 - Engine (pure): `js/trivia.js`, `js/engine.js` (match driver), `js/questions.js` (now category-organized, see above).
 - Client UI: `js/ui.js` (the only DOM module for the game), `js/home.js` (menu, now with logo), `lobby/lobby.js`, `social/social.js`, `social/chrome.js` (top bar, tab bar, sidebar, help dialog), `auth/login.js`.
-- Server: `server/game-rooms.js` (live matches, now also records answer stats), `server/ws.js` (websocket handler), `server/rooms.js`, `server/matchmaking.js`, `server/matches.js` (results and ELO), `server/social.js`, `server/auth.js`, `server/db.js`, `server/server.js`, `server/env.js` (dotenv loader, see above), `server/question-stats.js` (admin stats API + page).
+- Server: `server/game-rooms.js` (live matches, now also records answer stats), `server/ws.js` (websocket handler), `server/rooms.js`, `server/matchmaking.js`, `server/matches.js` (results and ELO), `server/social.js`, `server/auth.js` (accounts, login/signup, `/api/me`, email changes), `server/db.js`, `server/server.js`, `server/env.js` (dotenv loader, see above), `server/question-stats.js` (admin stats API + page), `server/email.js` (Resend wrapper), `server/password-reset.js`, `server/reports.js`.
 - Admin stats page: `server/admin/stats.html`.
 - Legal pages: `privacy.html`, `terms.html` (repo root).
+- Account pages: `auth/login.js` (now with email field, forgot-password link), `auth/forgot.js`, `auth/reset.js`, `auth/settings.js`.
 - Review/seed tooling (not part of the served app): `tools/build-review.mjs` + generated `tools/question-review.html`, `tools/seed-mock-stats.mjs`.
 - Styles: `css/style.css`. Later rules override earlier ones.
 
 ## Suggested next steps
 
-1. Confirm `RESEND_API_KEY` is in `server/.env`, then build password reset and the player-reporting feature on top of Resend.
-2. Set up a dedicated `quantrivia@gmail.com` and repoint Cloudflare's `contact@` routing to it (not urgent, deferred by the user).
-3. Get the user's Keep/Drop list back from `tools/question-review.html` and remove dropped questions from `js/questions.js`.
-4. Verify the `WITHIN_TEN_TIMES_RATE` fix actually shows the "wrong magnitude" flag on the mock ocean question in the live `/admin/stats` page.
-5. Fact-check every answer in `js/questions.js`, old and new.
-6. Check the menu, lobby, and standings on a real phone, starting signed out.
-7. Run one full ranked match with two real accounts and check the rating changes on the standings.
-8. Rewrite `CLAUDE.md` — it currently describes a different, older poker-style game. Delete leftover NBA files, and remove test accounts before any release.
-9. Add Privacy/Terms footer links to the landing page and menu, not just `auth/login.html`.
-10. Decide whether recent matches on profiles should be public.
+1. **Before deploying to the VPS, set `BASE_URL=https://playquantrivia.com` and double-check `FROM_EMAIL`/`RESEND_API_KEY`/`REPORT_EMAIL` in the VPS's own `server/.env`** — see the caveat under "Password reset" above. This is the one thing most likely to silently misbehave on first deploy.
+2. Build an in-app admin view for the `reports` table if report volume ever picks up — right now the only way to review reports is the email or a raw DB query.
+3. Set up a dedicated `quantrivia@gmail.com` and repoint Cloudflare's `contact@` routing to it (not urgent, deferred by the user).
+4. Get the user's Keep/Drop list back from `tools/question-review.html` and remove dropped questions from `js/questions.js`.
+5. Verify the `WITHIN_TEN_TIMES_RATE` fix actually shows the "wrong magnitude" flag on the mock ocean question in the live `/admin/stats` page.
+6. Fact-check every answer in `js/questions.js`, old and new.
+7. Check the menu, lobby, and standings on a real phone, starting signed out.
+8. Run one full ranked match with two real accounts and check the rating changes on the standings.
+9. Rewrite `CLAUDE.md` — it currently describes a different, older poker-style game. Delete leftover NBA files, and remove test accounts before any release (the `resettest1`/`resetemailcheck`/`featuretestA`/`featuretestB` accounts from this session's testing were already cleaned up).
+10. Add Privacy/Terms footer links to the landing page and menu, not just `auth/login.html`.
+11. Decide whether recent matches on profiles should be public.

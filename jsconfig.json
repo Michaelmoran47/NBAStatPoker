@@ -4,10 +4,11 @@
     "module": "ES2020",
     "lib": ["ES2020", "DOM"],
     "moduleResolution": "bundler",
+    "moduleDetection": "force",
     "checkJs": true,
     "allowJs": true,
     "noEmit": true,
     "strict": false
   },
-  "include": ["js/**/*.js", "auth/**/*.js", "lobby/**/*.js"]
+  "include": ["js/**/*.js", "auth/**/*.js", "lobby/**/*.js", "social/**/*.js"]
 }

@@ -82,6 +82,62 @@ function noticeHtml(text){
   return text ? `<div class="lobby-error" role="status">${escapeHtml(text)}</div>` : '';
 }
 
+// The report dialog is built once and reused for whichever profile is open, rather than
+// re-created on every render — a native <dialog> traps focus and closes on Escape for free,
+// matching the "How to play" dialog in chrome.js.
+const reportDialog = document.createElement('dialog');
+reportDialog.className = 'help-dialog';
+reportDialog.innerHTML = `
+  <form class="help-card" id="reportForm">
+    <h2 class="help-title">Report <span id="reportTargetName"></span></h2>
+    <div class="cc-field">
+      <label for="reportReason">Reason</label>
+      <select class="cc-input" id="reportReason" name="reason" required>
+        <option value="cheating">Cheating or exploiting</option>
+        <option value="abusive_language">Abusive language</option>
+        <option value="inappropriate_name">Inappropriate name</option>
+        <option value="other">Something else</option>
+      </select>
+    </div>
+    <div class="cc-field">
+      <label for="reportDetails">Details (optional)</label>
+      <textarea class="cc-input" id="reportDetails" name="details" maxlength="1000" rows="4"></textarea>
+    </div>
+    <div class="lobby-error" id="reportError" role="alert"></div>
+    <div style="display:flex; gap:10px;">
+      <button type="button" class="btn ghost" id="reportCancel" style="flex:1;">Cancel</button>
+      <button type="submit" class="btn primary" style="flex:1;">Submit report</button>
+    </div>
+  </form>`;
+document.body.appendChild(reportDialog);
+
+let reportTarget = '';
+/** @param {string} username */
+function openReportDialog(username){
+  reportTarget = username;
+  /** @type {HTMLElement} */ (reportDialog.querySelector('#reportTargetName')).textContent = displayName(username);
+  /** @type {HTMLFormElement} */ (reportDialog.querySelector('#reportForm')).reset();
+  /** @type {HTMLElement} */ (reportDialog.querySelector('#reportError')).textContent = '';
+  reportDialog.showModal();
+}
+reportDialog.querySelector('#reportCancel')?.addEventListener('click', () => reportDialog.close());
+reportDialog.addEventListener('click', e => { if(e.target === reportDialog) reportDialog.close(); });
+reportDialog.querySelector('#reportForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = /** @type {HTMLFormElement} */ (e.target);
+  const reason = /** @type {HTMLSelectElement} */ (form.elements.namedItem('reason')).value;
+  const details = /** @type {HTMLTextAreaElement} */ (form.elements.namedItem('details')).value;
+  const errorEl = /** @type {HTMLElement} */ (reportDialog.querySelector('#reportError'));
+  try{
+    await api('POST', '/api/reports', { username: reportTarget, reason, details });
+    reportDialog.close();
+    notice = `Report sent. Thanks for flagging it.`;
+    await rerender();
+  } catch (err) {
+    errorEl.textContent = err instanceof Error ? err.message : 'Something went wrong.';
+  }
+});
+
 /** @param {string} stamp SQLite datetime('now') text, which is UTC without a zone marker */
 function formatDate(stamp){
   const d = new Date(stamp.replace(' ', 'T') + 'Z');
@@ -165,6 +221,11 @@ async function renderProfile(username){
     none: `<button class="btn primary" data-act="add" data-user="${escapeHtml(p.username)}">Add friend</button>`
   };
   const relNote = { self: 'This is you', friends: 'Friends', outgoing: 'Request sent', incoming: 'Wants to be friends', none: '' }[/** @type {string} */ (p.relationship)] ?? '';
+  // "Report" is on every other player's profile regardless of friend status; your own profile gets
+  // a link to account settings instead, since reporting yourself makes no sense.
+  const extraLink = p.relationship === 'self'
+    ? '<a class="cc-link" href="/auth/settings.html">Account settings</a>'
+    : `<a class="cc-link" href="#" data-act="report" data-user="${escapeHtml(p.username)}">Report</a>`;
 
   /** @type {string} */
   let matchesHtml;
@@ -194,6 +255,7 @@ async function renderProfile(username){
         ${relNote ? `<p class="cc-sub">${escapeHtml(relNote)}</p>` : ''}
         <p class="cc-rating"><b class="mono">${p.elo}</b>Rating</p>
         ${actionsByRel[p.relationship] ? `<div class="cc-hero-actions">${actionsByRel[p.relationship]}</div>` : ''}
+        <p class="cc-sub" style="margin-top:4px;">${extraLink}</p>
       </section>
 
       <div class="cc-tiles">
@@ -278,6 +340,11 @@ app.addEventListener('click', async (event) => {
     return;
   }
   closeMenus();
+  if(act === 'report'){
+    event.preventDefault();
+    openReportDialog(username);
+    return;
+  }
   try{
     if(act === 'invite'){
       // A personal sign-up link. The friend who signs up through it becomes a friend straight away.

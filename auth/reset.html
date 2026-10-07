@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quantrivia — Set New Password</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .auth-wrap{
+    width:100%; display:flex; flex-direction:column;
+    align-items:center; justify-content:flex-start; gap:10px; padding-top:24px;
+  }
+  .auth-card{
+    width:min(90vw, 340px); margin:0 auto;
+    padding:28px 26px 26px;
+    display:flex; flex-direction:column; align-items:stretch; gap:14px;
+    color:var(--text);
+  }
+  .auth-title{
+    font-family:var(--font-display); font-stretch:condensed; font-weight:800;
+    text-transform:uppercase; letter-spacing:.03em; font-size:1.3em;
+    text-align:center; margin:0;
+  }
+  .auth-field{ display:flex; flex-direction:column; gap:4px; }
+  .auth-field label{
+    font-size:.78em; font-weight:700; color:var(--text); opacity:.85;
+    text-transform:uppercase; letter-spacing:.04em;
+  }
+  .auth-field input{
+    font-family:var(--font-body); font-size:1em; padding:10px 12px;
+    border-radius:8px; border:1.5px solid rgba(0,0,0,.3); background:#fff; color:var(--ink);
+  }
+  .auth-error{ color:#ff8a8a; font-size:.85em; font-weight:600; text-align:center; min-height:1.2em; }
+  .auth-status{ color:var(--text); text-align:center; font-size:.9em; }
+  .auth-hint{ color:var(--muted); font-size:.75em; text-align:center; }
+</style>
+</head>
+<body>
+<div class="auth-wrap">
+  <div id="app"></div>
+</div>
+<script type="module">
+  import { mountChrome } from '../social/chrome.js';
+  mountChrome({active: null, title: 'Set new password', back: '/auth/login.html', tabs: false, sidebar: false});
+</script>
+<script type="module" src="reset.js"></script>
+</body>
+</html>
