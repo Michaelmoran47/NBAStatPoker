@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NBA Stat Guess — Visual options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&family=Playfair+Display:wght@700;900&family=Bungee&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #d9dce3; color: #111; padding: 24px 16px 60px; }
+  h1 { font-family: Oswald, sans-serif; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 4px; }
+  .intro { color: #444; margin: 0 0 24px; font-size: 15px; }
+  .option { max-width: 720px; margin: 0 auto 36px; border-radius: 14px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,.18); }
+  .label { font-family: Inter, sans-serif; font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 10px 16px; background: #111; color: #fff; }
+  .screen { padding: 22px; }
+  .mono { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+
+  /* ---------- A: Broadcast (refined current direction) ---------- */
+  .a { background: radial-gradient(ellipse 120% 60% at 50% -10%, #1b2a48 0%, #0a1020 70%); color: #e9edf5; }
+  .a .bug { display: grid; grid-template-columns: 1fr 1.6fr 1fr; background: #05080f; border-left: 4px solid #ff9f1c; border-radius: 6px; overflow: hidden; }
+  .a .bug div { padding: 12px 8px; text-align: center; border-right: 1px solid rgba(255,255,255,.07); }
+  .a .bug div:last-child { border-right: none; }
+  .a .bug span { display: block; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #8b97b0; }
+  .a .bug b { font-family: Oswald, sans-serif; font-size: 26px; color: #ff9f1c; font-weight: 700; }
+  .a .card { margin-top: 16px; background: #efe9dc; color: #16181f; border-radius: 8px; padding: 16px; }
+  .a .input { background: #fffdf7; border: 1.5px solid #cfc6b0; border-radius: 6px; padding: 12px 14px; font-size: 15px; color: #888; }
+  .a .lock { margin-top: 10px; background: #ff9f1c; color: #1a1206; font-family: Oswald, sans-serif; text-transform: uppercase; letter-spacing: .06em; text-align: center; padding: 12px; border-radius: 6px; font-weight: 700; }
+  .a .row { display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 6px; background: #fffdf7; border: 1.5px solid #cfc6b0; margin-top: 6px; }
+  .a .row.gold { background: linear-gradient(90deg,#f7d774,#f3c24a); border-color: #b8860b; }
+  .a .row.green { background: #bfeccf; border-color: #2f9e5f; }
+  .a .row.yellow { background: #fbe9a2; border-color: #c99a10; }
+  .a .row small { display: block; color: #5b6170; font-size: 12px; }
+
+  /* ---------- B: Editorial stat sheet ---------- */
+  .b { background: #f6f1e7; color: #1a1a1a; }
+  .b .masthead { font-family: 'Playfair Display', serif; font-weight: 900; font-size: 30px; border-bottom: 3px double #1a1a1a; padding-bottom: 8px; display: flex; justify-content: space-between; align-items: baseline; }
+  .b .masthead span { font-family: Inter, sans-serif; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; font-weight: 600; }
+  .b .clue { display: grid; grid-template-columns: repeat(3,1fr); border-bottom: 1px solid #1a1a1a; margin-top: 14px; }
+  .b .clue div { padding: 10px 0; text-align: center; }
+  .b .clue div + div { border-left: 1px solid #c9bfa8; }
+  .b .clue span { display: block; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #6d665a; }
+  .b .clue b { font-family: 'Playfair Display', serif; font-size: 24px; }
+  .b .input { margin-top: 16px; border: none; border-bottom: 2px solid #1a1a1a; background: transparent; padding: 10px 0; font-family: 'Playfair Display', serif; font-size: 22px; color: #888; font-style: italic; }
+  .b .lock { margin-top: 12px; display: inline-block; border: 1.5px solid #1a1a1a; padding: 8px 16px; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; }
+  .b table { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 14px; }
+  .b th { text-align: left; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: #6d665a; border-bottom: 1px solid #1a1a1a; padding: 6px 4px; font-weight: 600; }
+  .b td { padding: 10px 4px; border-bottom: 1px solid #d8cfbb; }
+  .b td.num { text-align: right; font-family: 'IBM Plex Mono', monospace; }
+  .b tr.gold td:first-child::before { content: "★ "; color: #b8860b; }
+  .b tr.gold td { background: #f3e3a6; }
+  .b tr.green td { background: #d8eedd; }
+  .b tr.yellow td { background: #f7eec2; }
+
+  /* ---------- C: Bold arcade / sticker ---------- */
+  .c { background: #1d0b3b; color: #fff; }
+  .c .clue { display: flex; gap: 8px; }
+  .c .chip { flex: 1; border-radius: 14px; padding: 10px 6px; text-align: center; background: #ffd23f; color: #1d0b3b; transform: rotate(-1.5deg); box-shadow: 4px 4px 0 #ff3d7f; }
+  .c .chip:nth-child(2) { background: #3ef0c9; transform: rotate(1deg); box-shadow: 4px 4px 0 #ff3d7f; }
+  .c .chip:nth-child(3) { background: #ff3d7f; color: #fff; transform: rotate(-.5deg); box-shadow: 4px 4px 0 #ffd23f; }
+  .c .chip small { display: block; font-family: Inter, sans-serif; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; opacity: .8; }
+  .c .chip b { font-family: Bungee, sans-serif; font-size: 24px; font-weight: 400; }
+  .c .input { margin-top: 18px; background: #2e1862; border: 2px solid #3ef0c9; border-radius: 999px; padding: 13px 18px; color: #a993d6; font-size: 15px; }
+  .c .lock { margin-top: 12px; background: #3ef0c9; color: #1d0b3b; text-align: center; padding: 13px; border-radius: 999px; font-family: Bungee, sans-serif; font-size: 15px; box-shadow: 0 5px 0 #14a287; }
+  .c .row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 16px; margin-top: 8px; background: #2e1862; }
+  .c .pos { font-family: Bungee, sans-serif; font-size: 18px; width: 26px; text-align: center; color: #3ef0c9; }
+  .c .row .who { flex: 1; font-weight: 700; }
+  .c .row small { display: block; font-weight: 400; color: #b7a7e3; font-size: 12px; }
+  .c .row .dist { font-family: Bungee, sans-serif; font-size: 16px; }
+  .c .row.gold { background: #ffd23f; color: #1d0b3b; }
+  .c .row.gold small { color: #5a4300; }
+  .c .row.green { background: #3ef0c9; color: #0f2d27; }
+  .c .row.green small { color: #0f5447; }
+  .c .row.yellow { background: #ff9f5a; color: #3a1400; }
+  .c .row.yellow small { color: #5c2600; }
+  .c .winner { display: inline-block; background: #ff3d7f; padding: 6px 14px; border-radius: 999px; font-family: Bungee, sans-serif; font-size: 13px; margin-top: 16px; }
+</style>
+</head>
+<body>
+<h1>Visual options</h1>
+<p class="intro">Same screen, three looks. Each one shows the clue, the guess box, and closeness-ranked results with the gold, green, and yellow tiers.</p>
+
+<!-- A -->
+<section class="option">
+  <div class="label">A · Broadcast (refined)</div>
+  <div class="screen a">
+    <div class="bug">
+      <div><span>Rank</span><b>#26</b></div>
+      <div><span>Stat</span><b>Rebounds</b></div>
+      <div><span>Season</span><b>2022</b></div>
+    </div>
+    <div class="card">
+      <div style="font-size:14px;margin-bottom:10px;">Who ranks <b class="mono">#26</b> in Rebounds in 2022?</div>
+      <div class="input">Search any player…</div>
+      <div class="lock">Lock in guess</div>
+    </div>
+    <div class="card" style="margin-top:12px;">
+      <div class="row gold"><span class="mono">1</span><div class="who">Kyle Kuzma<small>#26 · exact</small></div><span class="mono">±0</span></div>
+      <div class="row yellow"><span class="mono">2</span><div class="who">Mo Bamba<small>#33</small></div><span class="mono">±7</span></div>
+      <div class="row"><span class="mono">3</span><div class="who">Stephen Curry<small>off the board</small></div><span class="mono">±50</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- B -->
+<section class="option">
+  <div class="label">B · Editorial stat sheet</div>
+  <div class="screen b">
+    <div class="masthead">NBA Stat Guess <span>Round 1 of 5</span></div>
+    <div class="clue">
+      <div><span>Rank</span><b>#26</b></div>
+      <div><span>Stat</span><b>Rebounds</b></div>
+      <div><span>Season</span><b>2022</b></div>
+    </div>
+    <div class="input">Type a player's name…</div>
+    <div class="lock">Lock in guess</div>
+    <table>
+      <tr><th>#</th><th>Player</th><th>Guess</th><th style="text-align:right">Off by</th></tr>
+      <tr class="gold"><td>1</td><td>Kyle Kuzma</td><td>#26 · exact</td><td class="num">0</td></tr>
+      <tr class="yellow"><td>2</td><td>Mo Bamba</td><td>#33</td><td class="num">7</td></tr>
+      <tr><td>3</td><td>Stephen Curry</td><td>off the board</td><td class="num">50</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- C -->
+<section class="option">
+  <div class="label">C · Bold arcade</div>
+  <div class="screen c">
+    <div class="clue">
+      <div class="chip"><small>Rank</small><b>#26</b></div>
+      <div class="chip"><small>Stat</small><b>REB</b></div>
+      <div class="chip"><small>Year</small><b>2022</b></div>
+    </div>
+    <div class="input">Find a player…</div>
+    <div class="lock">LOCK IT IN</div>
+    <div class="row gold"><span class="pos">1</span><div class="who">Kyle Kuzma<small>#26 · exact</small></div><span class="dist">0</span></div>
+    <div class="row green"><span class="pos">2</span><div class="who">Some Player<small>#29 · within 5</small></div><span class="dist">3</span></div>
+    <div class="row yellow"><span class="pos">3</span><div class="who">Mo Bamba<small>#33 · within 10</small></div><span class="dist">7</span></div>
+    <span class="winner">ROUND 1 → CPU 2</span>
+  </div>
+</section>
+</body>
+</html>

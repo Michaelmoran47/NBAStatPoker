@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quantrivia — Middle-ground palette options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@500;700;900&family=Nunito+Sans:wght@400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{ --font-display:"Rubik", "Arial Black", sans-serif; --font-body:"Nunito Sans", system-ui, sans-serif; --font-mono:"Space Mono", ui-monospace, monospace; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; padding:24px 16px 48px; background:#0e0f12; color:#e8e8ea; font-family:var(--font-body); }
+  h1{ font-family:var(--font-display); font-weight:700; font-size:22px; margin:0 0 6px; }
+  .intro{ margin:0 0 24px; color:#9aa3b2; font-size:14px; }
+  .grid{ display:flex; flex-wrap:wrap; gap:24px; }
+  .option{ width:360px; max-width:100%; }
+  .option-label{ font-size:13px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:#9aa3b2; margin:0 0 8px; }
+  .note{ font-size:13px; color:#9aa3b2; line-height:1.45; margin:10px 0 0; }
+
+  .screen{ background:var(--bg); color:var(--text); border-radius:24px; padding:16px; border:1px solid var(--line); display:flex; flex-direction:column; gap:12px; }
+  .topbar{ display:flex; justify-content:space-between; font-family:var(--font-display); font-size:13px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); }
+  .question{ background:var(--question); color:var(--question-ink); border-radius:18px; padding:16px; font-weight:800; font-size:16px; line-height:1.3; }
+  .card{ background:var(--card); border-radius:18px; padding:14px; }
+  .timer{ height:8px; border-radius:999px; background:rgba(127,127,127,.2); overflow:hidden; margin-bottom:12px; }
+  .timer-fill{ height:100%; border-radius:999px; width:70%; background:var(--ok); }
+  .input{ width:100%; height:46px; border-radius:999px; border:2px solid var(--line); background:var(--paper); color:var(--ink); padding:0 16px; font:700 16px var(--font-body); }
+  .btn{ width:100%; height:48px; margin-top:10px; border-radius:999px; border:0; background:var(--accent); color:var(--accent-ink); font-family:var(--font-display); font-size:15px; letter-spacing:.03em; text-transform:uppercase; box-shadow:0 5px 0 var(--accent-shadow); }
+  .sect{ font-size:12px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+  .row{ display:grid; grid-template-columns:28px 1fr auto; align-items:center; gap:10px; padding:11px 14px; border-radius:14px; background:var(--card-2); font-weight:700; }
+  .row .pos{ font-family:var(--font-display); color:var(--muted); }
+  .row small{ display:block; font-weight:500; font-size:12px; color:var(--muted); font-family:var(--font-mono); }
+  .row.gold{ background:var(--gold); color:var(--gold-ink); }
+  .row.gold small, .row.gold .pos{ color:var(--gold-ink); }
+  .row.green{ background:var(--ok); color:var(--ok-ink); }
+  .row.green small, .row.green .pos{ color:var(--ok-ink); }
+  .row.yellow{ background:var(--warn); color:var(--warn-ink); }
+  .row.yellow small, .row.yellow .pos{ color:var(--warn-ink); }
+  .legend{ display:flex; gap:12px; font-size:12px; color:var(--muted); font-weight:600; flex-wrap:wrap; }
+  .legend i{ display:inline-block; width:10px; height:10px; border-radius:999px; margin-right:5px; vertical-align:middle; }
+
+  /* Q · Ocean Glow Mid: deep sea blue with a clear cyan accent */
+  .ocean{ --bg:#081a26; --card:#10293a; --card-2:#163548; --line:#1f4560; --text:#eef8fc; --muted:#8db5c8;
+    --question:#f5d76e; --question-ink:#1d1700; --accent:#2bc4e8; --accent-ink:#04202c; --accent-shadow:#1a8fb0;
+    --ok:#5fd3b0; --ok-ink:#06261d; --warn:#f5d76e; --warn-ink:#1d1700; --gold:#f0ae1f; --gold-ink:#241700; --paper:#eef8fc; --ink:#081a26; }
+  /* R · Violet Mid: the purple you liked, with a clearer teal button */
+  .violet{ --bg:#1d0c3a; --card:#2b1753; --card-2:#36206a; --line:#4a2d82; --text:#f7f4fc; --muted:#b8a7de;
+    --question:#f7d154; --question-ink:#1d0c3a; --accent:#36e0c4; --accent-ink:#06261f; --accent-shadow:#1fa98f;
+    --ok:#36e0c4; --ok-ink:#06261f; --warn:#f7d154; --warn-ink:#1d0c3a; --gold:#f0ae1f; --gold-ink:#241700; --paper:#fff8e6; --ink:#1d0c3a; }
+  /* S · Night Blue: near-black navy with a bright sky accent */
+  .night{ --bg:#050710; --card:#0d1222; --card-2:#161d33; --line:#222c48; --text:#f0f5ff; --muted:#8e9cc0;
+    --question:#f7d154; --question-ink:#15110a; --accent:#55d8ff; --accent-ink:#031523; --accent-shadow:#2aa6cc;
+    --ok:#55e6b5; --ok-ink:#062018; --warn:#f7d154; --warn-ink:#15110a; --gold:#f0ae1f; --gold-ink:#241700; --paper:#f0f5ff; --ink:#050710; }
+  /* T · Graphite Blue: charcoal with a clear sky-blue accent and a warm yellow */
+  .graphite{ --bg:#0c0f16; --card:#161b26; --card-2:#1f2636; --line:#2b3446; --text:#f1f4fa; --muted:#98a3ba;
+    --question:#ffd166; --question-ink:#1d1603; --accent:#4fc3f7; --accent-ink:#06202e; --accent-shadow:#2b8fc0;
+    --ok:#6fd8ad; --ok-ink:#06261b; --warn:#ffd166; --warn-ink:#1d1603; --gold:#f0ae1f; --gold-ink:#241700; --paper:#f1f4fa; --ink:#0c0f16; }
+</style>
+</head>
+<body>
+  <h1>Quantrivia — middle-ground options</h1>
+  <p class="intro">Halfway between the punchy set and the calm set: real colour, but not shouting.</p>
+  <div class="grid">
+
+    <section class="option">
+      <p class="option-label">Q · Ocean Glow Mid</p>
+      <div class="screen ocean">
+        <div class="topbar"><span>Quantrivia</span><span>Round 2 / 5</span></div>
+        <div class="question">About how many miles is Earth from the Sun on average?</div>
+        <div class="card">
+          <div class="timer"><div class="timer-fill"></div></div>
+          <input class="input" value="92,960,000" aria-label="Your answer">
+          <button class="btn">Lock in</button>
+        </div>
+        <div class="sect">Round result</div>
+        <div class="row gold"><span class="pos">1</span><span>Mo<small>exact</small></span><span>0%</span></div>
+        <div class="row green"><span class="pos">2</span><span>Ana<small>within 3%</small></span><span>1.2%</span></div>
+        <div class="row yellow"><span class="pos">3</span><span>Jay<small>within 10%</small></span><span>7.5%</span></div>
+        <div class="legend"><span><i style="background:#f0ae1f"></i>Exact</span><span><i style="background:#5fd3b0"></i>3%</span><span><i style="background:#f5d76e"></i>10%</span></div>
+      </div>
+      <p class="note">Ocean Glow with a clearer cyan accent. Clearly the blue you liked, without the neon glare.</p>
+    </section>
+
+    <section class="option">
+      <p class="option-label">R · Violet Mid</p>
+      <div class="screen violet">
+        <div class="topbar"><span>Quantrivia</span><span>Round 2 / 5</span></div>
+        <div class="question">About how many miles is Earth from the Sun on average?</div>
+        <div class="card">
+          <div class="timer"><div class="timer-fill"></div></div>
+          <input class="input" value="92,960,000" aria-label="Your answer">
+          <button class="btn">Lock in</button>
+        </div>
+        <div class="sect">Round result</div>
+        <div class="row gold"><span class="pos">1</span><span>Mo<small>exact</small></span><span>0%</span></div>
+        <div class="row green"><span class="pos">2</span><span>Ana<small>within 3%</small></span><span>1.2%</span></div>
+        <div class="row yellow"><span class="pos">3</span><span>Jay<small>within 10%</small></span><span>7.5%</span></div>
+        <div class="legend"><span><i style="background:#f0ae1f"></i>Exact</span><span><i style="background:#36e0c4"></i>3%</span><span><i style="background:#f7d154"></i>10%</span></div>
+      </div>
+      <p class="note">The purple you had, with a clearer teal button. Closest to the original, just a bit brighter.</p>
+    </section>
+
+    <section class="option">
+      <p class="option-label">S · Night Blue</p>
+      <div class="screen night">
+        <div class="topbar"><span>Quantrivia</span><span>Round 2 / 5</span></div>
+        <div class="question">About how many miles is Earth from the Sun on average?</div>
+        <div class="card">
+          <div class="timer"><div class="timer-fill"></div></div>
+          <input class="input" value="92,960,000" aria-label="Your answer">
+          <button class="btn">Lock in</button>
+        </div>
+        <div class="sect">Round result</div>
+        <div class="row gold"><span class="pos">1</span><span>Mo<small>exact</small></span><span>0%</span></div>
+        <div class="row green"><span class="pos">2</span><span>Ana<small>within 3%</small></span><span>1.2%</span></div>
+        <div class="row yellow"><span class="pos">3</span><span>Jay<small>within 10%</small></span><span>7.5%</span></div>
+        <div class="legend"><span><i style="background:#f0ae1f"></i>Exact</span><span><i style="background:#55e6b5"></i>3%</span><span><i style="background:#f7d154"></i>10%</span></div>
+      </div>
+      <p class="note">Near-black navy with a bright sky accent. Keeps your black-and-blue feel with a bit more life than the calm set.</p>
+    </section>
+
+    <section class="option">
+      <p class="option-label">T · Graphite Blue</p>
+      <div class="screen graphite">
+        <div class="topbar"><span>Quantrivia</span><span>Round 2 / 5</span></div>
+        <div class="question">About how many miles is Earth from the Sun on average?</div>
+        <div class="card">
+          <div class="timer"><div class="timer-fill"></div></div>
+          <input class="input" value="92,960,000" aria-label="Your answer">
+          <button class="btn">Lock in</button>
+        </div>
+        <div class="sect">Round result</div>
+        <div class="row gold"><span class="pos">1</span><span>Mo<small>exact</small></span><span>0%</span></div>
+        <div class="row green"><span class="pos">2</span><span>Ana<small>within 3%</small></span><span>1.2%</span></div>
+        <div class="row yellow"><span class="pos">3</span><span>Jay<small>within 10%</small></span><span>7.5%</span></div>
+        <div class="legend"><span><i style="background:#f0ae1f"></i>Exact</span><span><i style="background:#6fd8ad"></i>3%</span><span><i style="background:#ffd166"></i>10%</span></div>
+      </div>
+      <p class="note">Charcoal with a clear sky-blue accent and a warm yellow question card. Readable all day, with the blue doing the work.</p>
+    </section>
+
+  </div>
+</body>
+</html>

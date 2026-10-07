@@ -76,6 +76,19 @@ db.exec(`
   );
 `);
 
+// One row per human answer in a multiplayer match: which question, and how far off the guess was
+// (NULL for no guess). There is deliberately no user id, so these rows can't be traced back to a player.
+// Read only by the admin stats page, see server/question-stats.js.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS question_answers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    question_id TEXT NOT NULL,
+    pct_off REAL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS question_answers_question ON question_answers(question_id);
+`);
+
 // Added after the original tables so an existing app.db (from before ELO existed) gets
 // the new columns too. CREATE TABLE IF NOT EXISTS alone would leave old databases missing
 // them. ALTER TABLE ... ADD COLUMN is guarded by a PRAGMA check because SQLite has no
@@ -87,3 +100,10 @@ function addColumnIfMissing(table, column, definition){
 }
 addColumnIfMissing('users', 'elo', `INTEGER NOT NULL DEFAULT ${START_ELO}`);
 addColumnIfMissing('match_results', 'elo_delta', 'INTEGER');
+// The guess itself, in the answer's base units (so a guess of 4 million miles is stored as 4000000).
+// Older rows from before this column existed have NULL here.
+addColumnIfMissing('question_answers', 'guess', 'REAL');
+// The question's text and correct answer, saved with each answer so the stats still make sense after a
+// question is edited or removed from the bank. Older rows have NULL here and fall back to the bank.
+addColumnIfMissing('question_answers', 'question_text', 'TEXT');
+addColumnIfMissing('question_answers', 'answer', 'REAL');

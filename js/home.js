@@ -5,7 +5,7 @@
 // Signed-in players get the menu, with one big button per way to play, like chess.com's Play screen:
 //   - Start game: ranked matchmaking, which opens the lobby already searching,
 //   - Play with friends: the lobby, to create or join a room,
-//   - Practice vs CPUs: solo play against two CPU opponents.
+//   - Practice vs Bots: solo play against two bot opponents.
 
 import { mountChrome } from '../social/chrome.js';
 import { escapeHtml } from './ui.js';
@@ -79,12 +79,20 @@ function renderLanding(){
 function render(me){
   app.innerHTML = `
     <div class="menu">
+      <div class="menu-logo">
+        <svg class="landing-mark" viewBox="0 0 120 120" role="img" aria-label="Quantrivia">
+          <circle cx="56" cy="56" r="30" fill="none" stroke="#fffa0b" stroke-width="13"/>
+          <path d="M76 78 L94 98" stroke="#fffa0b" stroke-width="13" stroke-linecap="round"/>
+          <circle cx="56" cy="56" r="6" fill="#7acaf6"/>
+        </svg>
+        <h1 class="landing-title">Quantrivia</h1>
+      </div>
       <p class="menu-signed">Signed in as <b>${escapeHtml(displayName(me.username))}</b> · Rating <b class="mono">${me.elo}</b></p>
       <div class="challenges" id="challenges"></div>
       <a class="btn lime big" href="/solo.html?daily=1">Play the Daily</a>
       <a class="btn primary yellow big" href="/lobby/lobby.html?mode=ranked">Play Ranked</a>
       <a class="btn panel big" href="/lobby/lobby.html?mode=friends">Play with friends</a>
-      <a class="btn panel big" href="/solo.html">Practice vs CPUs</a>
+      <a class="btn panel big" href="/solo.html">Practice vs Bots</a>
       <button class="btn panel big" id="logoutBtn">Log out</button>
     </div>`;
   document.getElementById('logoutBtn')?.addEventListener('click', async () => {

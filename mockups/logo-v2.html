@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quantrivia — Logo v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@500;700;900&display=swap" rel="stylesheet">
+<style>
+  body{ margin:0; padding:24px 16px 48px; background:#0e0f12; color:#e8e8ea; font-family:"Rubik", system-ui, sans-serif; }
+  h1{ font-weight:700; font-size:22px; margin:0 0 6px; }
+  .intro{ margin:0 0 24px; color:#9aa3b2; font-size:14px; }
+  .grid{ display:flex; flex-wrap:wrap; gap:24px; }
+  .option{ width:340px; max-width:100%; }
+  .option-label{ font-size:13px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:#9aa3b2; margin:0 0 8px; }
+  .tile{ border-radius:20px; padding:28px 16px; display:flex; flex-direction:column; align-items:center; gap:22px; background:#16181d; border:1px solid #2f3541; }
+  .tile.light{ background:#f5f1e8; border-color:#e2dccd; }
+  .small{ display:flex; gap:18px; align-items:center; }
+</style>
+</head>
+<body>
+  <h1>Quantrivia — logo v2</h1>
+  <p class="intro">The ring-and-dot mark from A, with the full word set in B's Rubik Black. The Q is no longer the logo.</p>
+
+  <div class="grid">
+    <section class="option">
+      <p class="option-label">Lockup · dark</p>
+      <div class="tile">
+        <svg viewBox="0 0 330 120" width="300" role="img" aria-label="Quantrivia">
+          <!-- The mark: a lens ring with a tail and a blue answer dot. Not a letter. -->
+          <circle cx="56" cy="60" r="40" fill="none" stroke="#f2c94c" stroke-width="14"/>
+          <path d="M80 92 L102 116" stroke="#f2c94c" stroke-width="14" stroke-linecap="round"/>
+          <circle cx="56" cy="60" r="7" fill="#5aa9ff"/>
+          <text x="118" y="78" font-family="Rubik, sans-serif" font-weight="900" font-size="46" fill="#f2f4f7" letter-spacing="1">QUANTRIVIA</text>
+        </svg>
+      </div>
+    </section>
+
+    <section class="option">
+      <p class="option-label">Lockup · light</p>
+      <div class="tile light">
+        <svg viewBox="0 0 330 120" width="300" role="img" aria-label="Quantrivia">
+          <circle cx="56" cy="60" r="40" fill="none" stroke="#c9a100" stroke-width="14"/>
+          <path d="M80 92 L102 116" stroke="#c9a100" stroke-width="14" stroke-linecap="round"/>
+          <circle cx="56" cy="60" r="7" fill="#2f7ad8"/>
+          <text x="118" y="78" font-family="Rubik, sans-serif" font-weight="900" font-size="46" fill="#16181d" letter-spacing="1">QUANTRIVIA</text>
+        </svg>
+      </div>
+    </section>
+
+    <section class="option">
+      <p class="option-label">Mark and app icon</p>
+      <div class="tile">
+        <div class="small">
+          <svg viewBox="0 0 120 120" width="120" role="img" aria-label="Quantrivia mark">
+            <rect width="120" height="120" rx="28" fill="#16181d"/>
+            <circle cx="56" cy="56" r="30" fill="none" stroke="#f2c94c" stroke-width="13"/>
+            <path d="M76 78 L94 98" stroke="#f2c94c" stroke-width="13" stroke-linecap="round"/>
+            <circle cx="56" cy="56" r="6" fill="#5aa9ff"/>
+          </svg>
+          <svg viewBox="0 0 60 60" width="56" role="img" aria-label="Quantrivia icon small">
+            <rect width="60" height="60" rx="14" fill="#16181d"/>
+            <circle cx="28" cy="28" r="15" fill="none" stroke="#f2c94c" stroke-width="7"/>
+            <path d="M38 39 L47 48" stroke="#f2c94c" stroke-width="7" stroke-linecap="round"/>
+            <circle cx="28" cy="28" r="3.5" fill="#5aa9ff"/>
+          </svg>
+        </div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

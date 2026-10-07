@@ -475,7 +475,10 @@ body.in-game.has-tabs{ padding-bottom:16px; }
 .menu{ width:100%; max-width:420px; margin:24px auto 0; display:flex; flex-direction:column; gap:14px; }
 .menu-signed{ margin:0 0 6px; text-align:center; color:var(--muted); font-size:.92em; }
 .menu a.btn{ display:block; width:100%; text-align:center; text-decoration:none; }
-.menu .btn.big{ padding:22px; font-size:1.3em; font-weight:900; }
+.menu .btn.big{ padding:13px; font-size:1.05em; font-weight:900; }
+.menu-logo{ display:flex; flex-direction:column; align-items:center; gap:6px; margin-bottom:6px; }
+.menu-logo .landing-mark{ width:72px; height:72px; }
+.menu-logo .landing-title{ font-size:1.6em; margin:0; }
 .menu button.btn{ width:100%; }
 
 /* ---------- Friends and profile: chess.com-style panels and list rows ---------- */

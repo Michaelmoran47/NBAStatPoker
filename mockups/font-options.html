@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quantrivia — Font options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@500;700;900&family=Chakra+Petch:wght@500;700&family=Bungee&family=Oswald:wght@500;700&family=Space+Grotesk:wght@500;700&family=Nunito+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{ --bg:#1d0c3a; --card:#2b1753; --card-2:#36206a; --text:#ffffff; --muted:#bfaee6; --yellow:#ffd23f; --ink:#1d0c3a; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; padding:24px 16px 48px; background:#0e0f12; color:#e8e8ea; font-family:"Nunito Sans", system-ui, sans-serif; }
+  h1{ font-weight:700; font-size:22px; margin:0 0 6px; font-family:"Nunito Sans", sans-serif; }
+  .intro{ margin:0 0 24px; color:#9aa3b2; font-size:14px; }
+  .grid{ display:flex; flex-wrap:wrap; gap:24px; }
+  .option{ width:340px; max-width:100%; }
+  .option-label{ font-size:13px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:#9aa3b2; margin:0 0 8px; }
+  .screen{ background:var(--bg); border-radius:24px; padding:22px 16px 26px; display:flex; flex-direction:column; align-items:center; gap:14px; border:1px solid #2b1753; }
+  .wordmark{ font-size:30px; letter-spacing:.02em; text-transform:uppercase; color:var(--text); margin:6px 0 0; font-weight:900; }
+  .signed{ margin:0; color:var(--muted); font-size:14px; }
+  .signed b{ color:var(--text); }
+  .menu{ width:100%; display:flex; flex-direction:column; gap:12px; margin-top:8px; }
+  .btn{ display:block; width:100%; text-align:center; text-decoration:none; padding:20px; border-radius:999px; border:2px solid; font-size:18px; font-weight:900; text-transform:uppercase; letter-spacing:.02em; }
+  .start{ background:linear-gradient(180deg,#ffe36b 0%,#f5b301 100%); border-color:#f5b301; color:#ffffff; box-shadow:0 5px 0 #c9a100; }
+  .panel{ background:linear-gradient(180deg,#4a2d85 0%,#2a1659 100%); border-color:#2a1659; color:#ffffff; box-shadow:0 5px 0 #1a0c3d; }
+  .f1 .wordmark, .f1 .btn{ font-family:"Chakra Petch", sans-serif; }
+  .f2 .wordmark, .f2 .btn{ font-family:"Bungee", sans-serif; font-weight:400; }
+  .f3 .wordmark, .f3 .btn{ font-family:"Oswald", sans-serif; }
+  .f4 .wordmark, .f4 .btn{ font-family:"Space Grotesk", sans-serif; }
+  .f0 .wordmark, .f0 .btn{ font-family:"Rubik", sans-serif; }
+  .f3 .btn{ font-weight:700; }
+  .f4 .btn{ font-weight:700; }
+  .note{ font-size:13px; color:#9aa3b2; line-height:1.45; margin:10px 0 0; }
+</style>
+</head>
+<body>
+  <h1>Quantrivia — font options</h1>
+  <p class="intro">The Start game menu, in each font for the title and buttons. The current font is Rubik.</p>
+  <div class="grid">
+
+    <section class="option">
+      <p class="option-label">Current · Rubik</p>
+      <div class="screen f0">
+        <p class="wordmark">Quantrivia</p>
+        <p class="signed">Signed in as <b>fonttest2</b> · Rating <b>1200</b></p>
+        <div class="menu">
+          <div class="btn start">Start game</div>
+          <div class="btn panel">Play with friends</div>
+          <div class="btn panel">Practice vs CPUs</div>
+          <div class="btn panel">Log out</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="option">
+      <p class="option-label">A · Chakra Petch</p>
+      <div class="screen f1">
+        <p class="wordmark">Quantrivia</p>
+        <p class="signed">Signed in as <b>fonttest2</b> · Rating <b>1200</b></p>
+        <div class="menu">
+          <div class="btn start">Start game</div>
+          <div class="btn panel">Play with friends</div>
+          <div class="btn panel">Practice vs CPUs</div>
+          <div class="btn panel">Log out</div>
+        </div>
+      </div>
+      <p class="note">Squarer and techy, like a sports HUD.</p>
+    </section>
+
+    <section class="option">
+      <p class="option-label">B · Bungee</p>
+      <div class="screen f2">
+        <p class="wordmark">Quantrivia</p>
+        <p class="signed">Signed in as <b>fonttest2</b> · Rating <b>1200</b></p>
+        <div class="menu">
+          <div class="btn start">Start game</div>
+          <div class="btn panel">Play with friends</div>
+          <div class="btn panel">Practice vs CPUs</div>
+          <div class="btn panel">Log out</div>
+        </div>
+      </div>
+      <p class="note">The chunkiest and most arcade-like. Closest to the current look, but the labels are wide.</p>
+    </section>
+
+    <section class="option">
+      <p class="option-label">C · Oswald</p>
+      <div class="screen f3">
+        <p class="wordmark">Quantrivia</p>
+        <p class="signed">Signed in as <b>fonttest2</b> · Rating <b>1200</b></p>
+        <div class="menu">
+          <div class="btn start">Start game</div>
+          <div class="btn panel">Play with friends</div>
+          <div class="btn panel">Practice vs CPUs</div>
+          <div class="btn panel">Log out</div>
+        </div>
+      </div>
+      <p class="note">Tall and condensed, like a scoreboard. The labels are smaller and the buttons feel lighter.</p>
+    </section>
+
+    <section class="option">
+      <p class="option-label">D · Space Grotesk</p>
+      <div class="screen f4">
+        <p class="wordmark">Quantrivia</p>
+        <p class="signed">Signed in as <b>fonttest2</b> · Rating <b>1200</b></p>
+        <div class="menu">
+          <div class="btn start">Start game</div>
+          <div class="btn panel">Play with friends</div>
+          <div class="btn panel">Practice vs CPUs</div>
+          <div class="btn panel">Log out</div>
+        </div>
+      </div>
+      <p class="note">Modern and neutral, with lighter weight. The calmest of the four.</p>
+    </section>
+
+  </div>
+</body>
+</html>

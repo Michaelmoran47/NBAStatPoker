@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trivia Guess — Theme options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bungee&family=Inter:wght@500;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  /* Each option sets the same tokens. The layout below never changes, only the palette. */
+  :root{ --font-display:"Bungee", "Arial Black", Impact, sans-serif; --font-body:"Inter", system-ui, sans-serif; --font-mono:"IBM Plex Mono", ui-monospace, monospace; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; padding:24px 16px 48px; background:#0e0f12; color:#e8e8ea; font-family:var(--font-body); }
+  h1{ font-family:var(--font-display); font-weight:400; font-size:22px; margin:0 0 6px; color:#f5f5f5; }
+  .intro{ margin:0 0 24px; color:#9a9aa3; font-size:14px; }
+  .grid{ display:flex; flex-wrap:wrap; gap:24px; }
+
+  .option{ width:360px; max-width:100%; }
+  .option-label{ font-size:13px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:#9a9aa3; margin:0 0 8px; }
+
+  /* The phone-sized screen. */
+  .screen{
+    background:var(--bg); color:var(--text); border-radius:24px; padding:16px;
+    border:1px solid var(--line); min-height:560px; display:flex; flex-direction:column; gap:12px;
+  }
+  .topbar{ display:flex; align-items:center; justify-content:space-between; font-family:var(--font-display); font-size:13px; color:var(--muted); letter-spacing:.04em; text-transform:uppercase; }
+  .round{ font-family:var(--font-mono); font-size:12px; color:var(--muted); }
+
+  .question{
+    background:var(--question); color:var(--question-ink); border-radius:18px; padding:16px;
+    font-weight:800; font-size:16px; line-height:1.3;
+  }
+  .card{ background:var(--card); border-radius:18px; padding:14px; }
+
+  .timer{ height:8px; border-radius:999px; background:rgba(255,255,255,.1); overflow:hidden; margin-bottom:12px; }
+  .timer-fill{ height:100%; border-radius:999px; }
+  .timer-fill.green{ background:var(--ok); width:70%; }
+  .timer-fill.yellow{ background:var(--warn); width:35%; }
+  .timer-fill.red{ background:var(--bad); width:12%; }
+
+  .answer{ display:flex; gap:8px; }
+  .input{
+    flex:1; min-width:0; height:48px; border-radius:999px; border:2px solid var(--line);
+    background:var(--card-2); color:var(--text); padding:0 16px; font:600 16px var(--font-body);
+  }
+  .unit{
+    height:48px; border-radius:999px; border:2px solid var(--line); background:var(--card-2);
+    color:var(--text); padding:0 14px; font:600 14px var(--font-body);
+  }
+  .preview{ font-family:var(--font-mono); font-size:13px; color:var(--accent); margin:8px 4px 12px; min-height:1.2em; }
+  .btn{
+    width:100%; height:50px; border-radius:999px; border:0; background:var(--accent); color:var(--accent-ink);
+    font-family:var(--font-display); font-size:15px; letter-spacing:.03em; text-transform:uppercase;
+  }
+
+  .sect{ font-size:12px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin:4px 2px 0; }
+  .row{
+    display:grid; grid-template-columns:28px 1fr auto; align-items:center; gap:10px;
+    padding:11px 14px; border-radius:14px; background:var(--card-2); font-weight:700;
+  }
+  .row .pos{ font-family:var(--font-display); font-size:14px; color:var(--muted); }
+  .row .who{ min-width:0; }
+  .row .who small{ display:block; font-weight:500; font-size:12px; color:var(--muted); font-family:var(--font-mono); }
+  .row .dist{ font-family:var(--font-mono); font-size:14px; }
+  .row.gold{ background:var(--gold); color:var(--gold-ink); }
+  .row.gold .pos, .row.gold .who small{ color:var(--gold-ink); }
+  .row.green{ background:var(--ok); color:var(--ok-ink); }
+  .row.green .pos, .row.green .who small{ color:var(--ok-ink); }
+  .row.yellow{ background:var(--warn); color:var(--warn-ink); }
+  .row.yellow .pos, .row.yellow .who small{ color:var(--warn-ink); }
+
+  .legend{ display:flex; gap:12px; font-size:12px; color:var(--muted); font-weight:600; flex-wrap:wrap; }
+  .legend i{ display:inline-block; width:10px; height:10px; border-radius:999px; margin-right:5px; vertical-align:middle; }
+
+  .elo-up{ color:var(--ok); font-family:var(--font-mono); font-weight:700; }
+  .elo-down{ color:var(--bad); font-family:var(--font-mono); font-weight:700; }
+  .pill{ display:inline-block; padding:4px 10px; border-radius:999px; background:var(--card-2); font-size:12px; font-weight:700; color:var(--muted); }
+
+  /* Four palettes. The `--bg` and `--card` values are the main change between them. */
+  .slate{
+    --bg:#16181d; --card:#1f232b; --card-2:#262b35; --line:#2f3541;
+    --text:#f2f4f7; --muted:#9aa3b2;
+    --question:#f2c94c; --question-ink:#1d1a10;
+    --accent:#5aa9ff; --accent-ink:#0b1b2e;
+    --ok:#4ade80; --ok-ink:#0c2615;
+    --warn:#f2c94c; --warn-ink:#2a2208;
+    --bad:#ff5d5d;
+    --gold:#f5b301; --gold-ink:#2a1d00;
+  }
+  .chess{
+    --bg:#262421; --card:#302e2b; --card-2:#3a3835; --line:#4a4743;
+    --text:#f0eeea; --muted:#a3a09a;
+    --question:#e8e3d6; --question-ink:#2b2a26;
+    --accent:#7fb24a; --accent-ink:#14210a;
+    --ok:#7fb24a; --ok-ink:#14210a;
+    --warn:#f2c94c; --warn-ink:#2a2208;
+    --bad:#e8564a;
+    --gold:#f5b301; --gold-ink:#2a1d00;
+  }
+  .ocean{
+    --bg:#0c1f24; --card:#133038; --card-2:#183c46; --line:#22505c;
+    --text:#eaf7f8; --muted:#8fb6bc;
+    --question:#ffd166; --question-ink:#2a1f00;
+    --accent:#2dd4bf; --accent-ink:#052a25;
+    --ok:#4ade80; --ok-ink:#0c2615;
+    --warn:#ffd166; --warn-ink:#2a1f00;
+    --bad:#ff6b6b;
+    --gold:#f5b301; --gold-ink:#2a1d00;
+  }
+  .ember{
+    --bg:#1a1714; --card:#26221e; --card-2:#312b25; --line:#3d362f;
+    --text:#f7f1ea; --muted:#a89c8e;
+    --question:#fbbf24; --question-ink:#2a1d05;
+    --accent:#fb923c; --accent-ink:#2a1405;
+    --ok:#6ee7a0; --ok-ink:#0d2a1a;
+    --warn:#fde047; --warn-ink:#2a2505;
+    --bad:#f87171;
+    --gold:#f5b301; --gold-ink:#2a1d00;
+  }
+</style>
+</head>
+<body>
+  <h1>Trivia Guess — theme options</h1>
+  <p class="intro">Same layout in four palettes, none of them purple. Each one follows DESIGN.md: green within 3%, yellow within 10%, gold for exact, and a green→yellow→red timer.</p>
+  <div class="grid">
+
+    <section class="option">
+      <p class="option-label">A · Midnight Slate</p>
+      <div class="screen slate">
+        <div class="topbar"><span>Trivia Guess</span><span class="round">Round 2 / 5</span></div>
+        <div class="question">About how many miles is Earth from the Sun on average?</div>
+        <div class="card">
+          <div class="timer"><div class="timer-fill green"></div></div>
+          <div class="answer"><input class="input" value="92,960,000" aria-label="Your answer"><select class="unit"><option>miles</option></select></div>
+          <div class="preview">92,960,000 miles</div>
+          <button class="btn">Lock in</button>
+        </div>
+        <div class="sect">Round result</div>
+        <div class="row gold"><span class="pos">1</span><span class="who">Mo<small>92,960,000 · exact</small></span><span class="dist">0%</span></div>
+        <div class="row green"><span class="pos">2</span><span class="who">Ana<small>94,100,000 · within 3%</small></span><span class="dist">1.2%</span></div>
+        <div class="row yellow"><span class="pos">3</span><span class="who">Jay<small>86,000,000 · within 10%</small></span><span class="dist">7.5%</span></div>
+        <div class="legend"><span><i style="background:#f5b301"></i>Exact</span><span><i style="background:#4ade80"></i>3%</span><span><i style="background:#f2c94c"></i>10%</span></div>
+      </div>
+    </section>
+
+    <section class="option">
+      <p class="option-label">B · Charcoal Board</p>
+      <div class="screen chess">
+        <div class="topbar"><span>Trivia Guess</span><span class="round">Round 2 / 5</span></div>
+        <div class="question">About how many miles is Earth from the Sun on average?</div>
+        <div class="card">
+          <div class="timer"><div class="timer-fill yellow"></div></div>
+          <div class="answer"><input class="input" value="92,960,000" aria-label="Your answer"><select class="unit"><option>miles</option></select></div>
+          <div class="preview">92,960,000 miles</div>
+          <button class="btn">Lock in</button>
+        </div>
+        <div class="sect">Round result</div>
+        <div class="row gold"><span class="pos">1</span><span class="who">Mo<small>92,960,000 · exact</small></span><span class="dist">0%</span></div>
+        <div class="row green"><span class="pos">2</span><span class="who">Ana<small>94,100,000 · within 3%</small></span><span class="dist">1.2%</span></div>
+        <div class="row yellow"><span class="pos">3</span><span class="who">Jay<small>86,000,000 · within 10%</small></span><span class="dist">7.5%</span></div>
+        <div class="legend"><span><i style="background:#f5b301"></i>Exact</span><span><i style="background:#7fb24a"></i>3%</span><span><i style="background:#f2c94c"></i>10%</span></div>
+      </div>
+    </section>
+
+    <section class="option">
+      <p class="option-label">C · Deep Ocean</p>
+      <div class="screen ocean">
+        <div class="topbar"><span>Trivia Guess</span><span class="round">Round 2 / 5</span></div>
+        <div class="question">About how many miles is Earth from the Sun on average?</div>
+        <div class="card">
+          <div class="timer"><div class="timer-fill red"></div></div>
+          <div class="answer"><input class="input" value="92,960,000" aria-label="Your answer"><select class="unit"><option>miles</option></select></div>
+          <div class="preview">92,960,000 miles</div>
+          <button class="btn">Lock in</button>
+        </div>
+        <div class="sect">Round result</div>
+        <div class="row gold"><span class="pos">1</span><span class="who">Mo<small>92,960,000 · exact</small></span><span class="dist">0%</span></div>
+        <div class="row green"><span class="pos">2</span><span class="who">Ana<small>94,100,000 · within 3%</small></span><span class="dist">1.2%</span></div>
+        <div class="row yellow"><span class="pos">3</span><span class="who">Jay<small>86,000,000 · within 10%</small></span><span class="dist">7.5%</span></div>
+        <div class="legend"><span><i style="background:#f5b301"></i>Exact</span><span><i style="background:#4ade80"></i>3%</span><span><i style="background:#ffd166"></i>10%</span></div>
+      </div>
+    </section>
+
+    <section class="option">
+      <p class="option-label">D · Warm Ember</p>
+      <div class="screen ember">
+        <div class="topbar"><span>Trivia Guess</span><span class="round">Round 2 / 5</span></div>
+        <div class="question">About how many miles is Earth from the Sun on average?</div>
+        <div class="card">
+          <div class="timer"><div class="timer-fill yellow"></div></div>
+          <div class="answer"><input class="input" value="92,960,000" aria-label="Your answer"><select class="unit"><option>miles</option></select></div>
+          <div class="preview">92,960,000 miles</div>
+          <button class="btn">Lock in</button>
+        </div>
+        <div class="sect">Final standings</div>
+        <div class="row gold"><span class="pos">1</span><span class="who">Mo<small>winner</small></span><span class="elo-up">+16</span></div>
+        <div class="row green"><span class="pos">2</span><span class="who">Ana<small>2nd</small></span><span class="dist">0</span></div>
+        <div class="row yellow"><span class="pos">3</span><span class="who">Jay<small>3rd</small></span><span class="elo-down">−16</span></div>
+        <div class="legend"><span><i style="background:#f5b301"></i>Exact</span><span><i style="background:#6ee7a0"></i>3%</span><span><i style="background:#fde047"></i>10%</span></div>
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>

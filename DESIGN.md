@@ -53,7 +53,7 @@ Colour is the main signal for how a guess landed. Always pair it with a word or 
 - **Home:** one loud primary button ("Play Ranked"), with the secondary options (friends, practice) set quieter below it, the way chess.com puts "Play" first.
 - **Play the Daily:** a filled palette-green button above Play Ranked. It is a solo challenge with no CPU opponents: the same five questions for everyone on the day (UTC date), and the goal is to score as many points as possible. There is no time limit: each round waits until you lock in.
 - **During a match:** the tab bar and sidebar are hidden (`body.in-game`). The top bar stays so help and back still work.
-- **Landing:** signed-out visitors see the logo, the tagline "a numbers based trivia game", and two pill buttons: Log in and Sign up (playing needs an account, so there's no Play button here). Signed-in players land on the main menu: Play the Daily (solo, same questions for everyone), Play Ranked (ranked queue), Play with friends (lobby), Practice vs CPUs (solo).
+- **Landing:** signed-out visitors see the logo, the tagline "a numbers based trivia game", and two pill buttons: Log in and Sign up (playing needs an account, so there's no Play button here). Signed-in players land on the main menu: Play the Daily (solo, same questions for everyone), Play Ranked (ranked queue), Play with friends (lobby), Practice vs Bots (solo).
 - **Back navigation:** inside the lobby, the room and ranked-queue screens each have their own back arrow. Room back means leave the room, and queue back means cancel the search.
 
 ## Motion

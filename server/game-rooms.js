@@ -7,6 +7,7 @@ import { makeGame, submitGuess, allGuessed, standings, viewFor, pickQuestions, d
 import { QUESTIONS } from '../js/questions.js';
 import { playGame } from '../js/engine.js';
 import { recordForfeit, recordMatchResults } from './matches.js';
+import { recordQuestionAnswers } from './question-stats.js';
 
 // Overridable only for local verification. Never set in a real deployment, since a short grace period
 // defeats the point of having one.
@@ -143,6 +144,7 @@ async function runGame(game){
   });
 
   if(liveGames.get(roomId) !== game) return; // room was torn down mid-match
+  recordQuestionAnswers(game.G.history, new Set(game.seats.filter(s => s.userId !== null).map(s => s.seatId)));
   const placeBySeat = new Map(standings(game.G).map(p => [p.id, p.place]));
   // A player who quit is ranked tied for last, whatever their score was, so quitting always costs rating.
   const stayedPlaces = [...placeBySeat].filter(([id]) => !game.quitSeats.has(id)).map(([, place]) => place);

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Question review</title>
+<style>
+  body{ margin:0; font-family:system-ui, sans-serif; background:#0f1237; color:#fff; }
+  main{ max-width:760px; margin:0 auto; padding:20px 16px 60px; }
+  h1{ font-size:1.3em; margin:0 0 4px; }
+  .sub{ color:#a2a7e5; font-size:.9em; margin:0 0 14px; }
+  .bar{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
+  button{ font:inherit; padding:8px 14px; border-radius:8px; border:0; cursor:pointer; background:#262d8c; color:#fff; }
+  button.keep{ background:#65c853; color:#0f1237; }
+  button.drop{ background:#ff4d4d; color:#fff; }
+  button.on{ outline:3px solid #fffa0b; }
+  .card{ background:#1e2470; border-radius:10px; padding:12px 14px; margin-bottom:10px; }
+  .cat{ color:#7acaf6; font-size:.78em; text-transform:uppercase; letter-spacing:.05em; }
+  .text{ margin:4px 0 8px; }
+  .meta{ color:#a2a7e5; font-size:.82em; margin-bottom:8px; }
+  .card.dropped{ opacity:.55; }
+  textarea{ width:100%; box-sizing:border-box; min-height:120px; background:#0f1237; color:#fff; border:1px solid #a2a7e5; border-radius:8px; padding:8px; font:inherit; }
+  .count{ color:#fffa0b; font-weight:700; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Question review</h1>
+  <p class="sub">Mark each question Keep or Drop. Your choices save in this browser, so you can come back later. When you're done, press "Copy drop list" and paste it into the chat.</p>
+  <div class="bar">
+    <span class="count" id="count"></span>
+    <button id="copy">Copy drop list</button>
+    <button id="reset">Clear all marks</button>
+  </div>
+  <div id="list"></div>
+</main>
+<script>
+  const QUESTIONS = [{"id":"olympic-rings","category":"Sports","text":"How many interlocking rings are on the Olympic flag?","answer":5,"label":""},{"id":"africa-countries","category":"Geography","text":"How many countries are on the African continent?","answer":54,"label":""},{"id":"germany-neighbors","category":"Geography","text":"How many countries share a land border with Germany?","answer":9,"label":""},{"id":"russia-timezones","category":"Geography","text":"How many time zones does Russia span?","answer":11,"label":""},{"id":"earth-circumference","category":"Geography","text":"How many miles is Earth's circumference at the equator?","answer":24901,"label":"miles"},{"id":"earth-surface-area","category":"Geography","text":"About how many square miles is Earth's total surface area?","answer":196900000,"label":"sq mi"},{"id":"pacific-area","category":"Geography","text":"About how many square miles is the Pacific Ocean?","answer":63800000,"label":"sq mi"},{"id":"everest-height","category":"Geography","text":"How tall is Mount Everest, in feet?","answer":29032,"label":"ft"},{"id":"rainier-height","category":"Geography","text":"How many feet tall is Mount Rainier?","answer":14411,"label":"ft"},{"id":"fuji-height","category":"Geography","text":"How many feet tall is Mount Fuji?","answer":12389,"label":"ft"},{"id":"kilimanjaro-height","category":"Geography","text":"How many feet tall is Mount Kilimanjaro?","answer":19341,"label":"ft"},{"id":"denali-height","category":"Geography","text":"How many feet tall is Denali (Mount McKinley)?","answer":20310,"label":"ft"},{"id":"k2-height","category":"Geography","text":"How many feet tall is K2?","answer":28251,"label":"ft"},{"id":"mariana-depth","category":"Geography","text":"About how many feet deep is the Challenger Deep in the Mariana Trench?","answer":36070,"label":"ft"},{"id":"grand-canyon-depth","category":"Geography","text":"About how many feet deep is the Grand Canyon at its deepest point?","answer":6093,"label":"ft"},{"id":"dead-sea-depth","category":"Geography","text":"About how many feet below sea level is the surface of the Dead Sea?","answer":1412,"label":"ft"},{"id":"mississippi-length","category":"Geography","text":"About how many miles long is the Mississippi River?","answer":2340,"label":"miles"},{"id":"lake-superior-area","category":"Geography","text":"About how many square miles is Lake Superior?","answer":31700,"label":"sq mi"},{"id":"lake-michigan-area","category":"Geography","text":"About how many square miles is Lake Michigan?","answer":22404,"label":"sq mi"},{"id":"texas-area","category":"Geography","text":"About how many square miles is Texas, including water?","answer":268596,"label":"sq mi"},{"id":"alaska-area","category":"Geography","text":"About how many square miles is Alaska?","answer":663268,"label":"sq mi"},{"id":"greenland-area","category":"Geography","text":"About how many square miles is Greenland?","answer":836330,"label":"sq mi"},{"id":"madagascar-area","category":"Geography","text":"About how many square miles is Madagascar?","answer":226658,"label":"sq mi"},{"id":"brazil-area","category":"Geography","text":"About how many square miles is Brazil?","answer":3287612,"label":"sq mi"},{"id":"canada-area","category":"Geography","text":"About how many square miles is Canada, including water?","answer":3855103,"label":"sq mi"},{"id":"australia-area","category":"Geography","text":"About how many square miles is Australia?","answer":2969907,"label":"sq mi"},{"id":"appalachian-length","category":"Geography","text":"About how many miles long is the Appalachian Trail?","answer":2198,"label":"miles"},{"id":"route66-length","category":"Geography","text":"About how many miles long was the original Route 66?","answer":2448,"label":"miles"},{"id":"trans-siberian-length","category":"Geography","text":"About how many miles long is the Trans-Siberian Railway?","answer":5772,"label":"miles"},{"id":"great-barrier-length","category":"Geography","text":"About how many miles long is the Great Barrier Reef?","answer":1429,"label":"miles"},{"id":"burj-height","category":"Geography","text":"How many feet tall is the Burj Khalifa?","answer":2717,"label":"ft"},{"id":"statue-liberty-height","category":"Geography","text":"About how many feet from the ground to the torch of the Statue of Liberty?","answer":305,"label":"ft"},{"id":"golden-gate-span","category":"Geography","text":"About how many feet long is the main span of the Golden Gate Bridge?","answer":4200,"label":"ft"},{"id":"hoover-height","category":"Geography","text":"About how many feet tall is the Hoover Dam?","answer":726,"label":"ft"},{"id":"un-members","category":"Society","text":"How many member states does the United Nations have?","answer":193,"label":""},{"id":"un-official-languages","category":"Society","text":"How many official languages does the United Nations use?","answer":6,"label":""},{"id":"apollo-moon-landings","category":"Society","text":"How many crewed Apollo missions landed on the Moon?","answer":6,"label":""},{"id":"speed-of-light","category":"Astronomy","text":"About how many miles per second does light travel?","answer":186282,"label":"miles/s"},{"id":"earth-moon-distance","category":"Astronomy","text":"About how many miles is the Moon from Earth on average?","answer":238855,"label":"miles"},{"id":"earth-sun-distance","category":"Astronomy","text":"About how many miles is Earth from the Sun on average?","answer":92960000,"label":"miles"},{"id":"earth-age","category":"Astronomy","text":"About how many years old is the Earth?","answer":4540000000,"label":"years"},{"id":"earth-equatorial-diameter","category":"Astronomy","text":"About how many miles across is Earth at the equator?","answer":7926,"label":"miles"},{"id":"earth-polar-circumference","category":"Astronomy","text":"About how many miles is Earth's circumference through the poles?","answer":24860,"label":"miles"},{"id":"jupiter-diameter","category":"Astronomy","text":"About how many miles across is Jupiter at its equator?","answer":86881,"label":"miles"},{"id":"pluto-sun-distance","category":"Astronomy","text":"About how many miles is Pluto from the Sun on average?","answer":3670000000,"label":"miles"},{"id":"bones-adult","category":"Science","text":"How many bones are in the adult human body?","answer":206,"label":""},{"id":"skull-bones","category":"Science","text":"How many bones are in an adult human skull, including the ear bones?","answer":22,"label":""},{"id":"adult-teeth","category":"Science","text":"How many teeth does a healthy adult human normally have?","answer":32,"label":""},{"id":"chromosomes","category":"Science","text":"How many chromosomes are in a typical human body cell?","answer":46,"label":""},{"id":"periodic-elements","category":"Science","text":"How many chemical elements are on the periodic table (as of 2025)?","answer":118,"label":""},{"id":"sound-speed","category":"Science","text":"About how many miles per hour does sound travel at sea level?","answer":761,"label":"mph"},{"id":"bible-books","category":"Culture","text":"How many books are in the Protestant Bible?","answer":66,"label":""},{"id":"piano-keys","category":"Culture","text":"How many keys does a standard piano have?","answer":88,"label":""},{"id":"shakespeare-plays","category":"Culture","text":"How many plays are generally attributed to William Shakespeare?","answer":39,"label":""},{"id":"chess-squares","category":"Culture","text":"How many squares are on a chessboard?","answer":64,"label":""},{"id":"leap-year-days","category":"Everyday","text":"How many days are in a leap year?","answer":366,"label":""},{"id":"seconds-day","category":"Everyday","text":"How many seconds are in one day?","answer":86400,"label":""},{"id":"minutes-week","category":"Everyday","text":"How many minutes are in one week?","answer":10080,"label":""},{"id":"hours-year","category":"Everyday","text":"How many hours are in a common (non-leap) year?","answer":8760,"label":""},{"id":"inches-mile","category":"Everyday","text":"How many inches are in one mile?","answer":63360,"label":""},{"id":"grams-pound","category":"Everyday","text":"How many grams are in one avoirdupois pound?","answer":453.59,"label":"g"}];
+  const KEY = 'quantrivia-question-review';
+  let marks = {};
+  try { marks = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { marks = {}; }
+
+  function save(){
+    try { localStorage.setItem(KEY, JSON.stringify(marks)); } catch (e) { /* private window: marks last only this page */ }
+    updateCount();
+  }
+
+  function updateCount(){
+    const drops = Object.values(marks).filter(v => v === 'drop').length;
+    const keeps = Object.values(marks).filter(v => v === 'keep').length;
+    document.getElementById('count').textContent = keeps + ' kept, ' + drops + ' dropped, ' + (QUESTIONS.length - keeps - drops) + ' unmarked';
+  }
+
+  function render(){
+    const list = document.getElementById('list');
+    list.textContent = '';
+    for(const q of QUESTIONS){
+      const card = document.createElement('div');
+      card.className = 'card' + (marks[q.id] === 'drop' ? ' dropped' : '');
+      const cat = document.createElement('div');
+      cat.className = 'cat';
+      cat.textContent = q.category + ' · ' + q.id;
+      const text = document.createElement('div');
+      text.className = 'text';
+      text.textContent = q.text;
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = 'Answer: ' + q.answer.toLocaleString() + (q.label ? ' ' + q.label : '');
+      const row = document.createElement('div');
+      row.className = 'bar';
+      row.style.marginBottom = '0';
+      for(const [value, label, cls] of [['keep', 'Keep', 'keep'], ['drop', 'Drop', 'drop']]){
+        const b = document.createElement('button');
+        b.textContent = label;
+        b.className = cls + (marks[q.id] === value ? ' on' : '');
+        b.addEventListener('click', () => {
+          marks[q.id] = marks[q.id] === value ? undefined : value;
+          if(marks[q.id] === undefined) delete marks[q.id];
+          save();
+          render();
+        });
+        row.appendChild(b);
+      }
+      card.append(cat, text, meta, row);
+      list.appendChild(card);
+    }
+    updateCount();
+  }
+
+  document.getElementById('copy').addEventListener('click', async () => {
+    const drops = QUESTIONS.filter(q => marks[q.id] === 'drop').map(q => q.id);
+    const text = drops.length ? 'Drop: ' + drops.join(', ') : 'Drop: none';
+    try {
+      await navigator.clipboard.writeText(text);
+      alert('Copied: ' + text);
+    } catch (e) {
+      prompt('Copy this list:', text);
+    }
+  });
+
+  document.getElementById('reset').addEventListener('click', () => {
+    if(!confirm('Clear all Keep and Drop marks?')) return;
+    marks = {};
+    save();
+    render();
+  });
+
+  render();
+</script>
+</body>
+</html>

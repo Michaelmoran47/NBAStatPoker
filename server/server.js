@@ -2,7 +2,7 @@
 // Express app: serves the existing static site (unchanged) plus the new /api auth
 // routes, all from one process — one `npm start` runs the whole thing locally.
 
-import 'dotenv/config'; // loads server/.env into process.env, if that file exists
+import './env.js'; // must stay first: loads server/.env before the modules below read it
 import express from 'express';
 import session from 'express-session';
 import http from 'node:http';
@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { authRouter } from './auth.js';
 import { socialRouter } from './social.js';
 import { attachWebSocketServer } from './ws.js';
+import { adminRouter } from './question-stats.js';
 import { db } from './db.js'; // creates the DB file + tables on first run, as a side effect
 import { SqliteSessionStore } from './session-store.js';
 
@@ -57,6 +58,7 @@ app.use(sessionMiddleware);
 
 app.use('/api', authRouter);
 app.use('/api', socialRouter);
+app.use(adminRouter); // owner-only stats page and data, see server/question-stats.js
 
 // Public, non-secret config the client needs — a Google OAuth Client ID is meant to
 // be visible in client-side code (unlike a client secret, which this app never uses
@@ -80,7 +82,7 @@ app.get('/api/config', (req, res) => {
 for (const dir of ['css', 'js', 'auth', 'lobby', 'social']) {
   app.use(`/${dir}`, express.static(path.join(projectRoot, dir)));
 }
-for (const file of ['index.html', 'solo.html']) {
+for (const file of ['index.html', 'solo.html', 'privacy.html', 'terms.html']) {
   app.get(`/${file}`, (req, res) => res.sendFile(path.join(projectRoot, file)));
 }
 app.get('/', (req, res) => res.sendFile(path.join(projectRoot, 'index.html')));

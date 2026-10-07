@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quantrivia — Question Stats</title>
+<style>
+  :root{ --bg:#0f1237; --card:#1e2470; --text:#fff; --muted:#a2a7e5; --accent:#7acaf6; --yellow:#fffa0b; --green:#65c853; }
+  body{ margin:0; background:var(--bg); color:var(--text); font-family:system-ui, sans-serif; }
+  main{ max-width:1100px; margin:0 auto; padding:20px 16px 48px; }
+  h1{ font-size:1.4em; margin:0 0 4px; }
+  h3{ font-size:1em; margin:0 0 6px; color:var(--muted); font-weight:600; }
+  .sub{ color:var(--muted); font-size:.9em; margin:0 0 16px; }
+  .error{ color:#ff8a8a; }
+  table{ width:100%; border-collapse:collapse; background:var(--card); border-radius:10px; overflow:hidden; font-size:.9em; }
+  th, td{ padding:8px 10px; text-align:right; border-bottom:1px solid rgba(255,255,255,.08); }
+  th:first-child, td:first-child{ text-align:left; }
+  th{ color:var(--muted); font-weight:600; cursor:pointer; user-select:none; }
+  tr.row{ cursor:pointer; }
+  tr.row:hover{ background:rgba(255,255,255,.06); }
+  td.q{ max-width:380px; }
+  td.review{ color:var(--yellow); text-align:left; font-size:.85em; }
+  .detail{ margin-top:18px; background:var(--card); border-radius:10px; padding:14px; }
+  .detail h2{ font-size:1.05em; margin:0 0 10px; color:var(--yellow); }
+  .summary{ font-size:1em; margin:0 0 14px; line-height:1.5; }
+  .summary b{ color:var(--yellow); }
+  .strip-note{ color:var(--muted); font-size:.85em; margin:8px 0 14px; }
+  .section{ margin-bottom:18px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Question stats</h1>
+  <p class="sub">Only you can see this page. Click a column heading to sort, or a row for details. A "Review" note means the question is worth a look. It doesn't mean the question should be removed.</p>
+  <p id="status" class="sub">Loading…</p>
+  <table id="table" hidden>
+    <thead>
+      <tr>
+        <th data-key="text">Question</th>
+        <th data-key="shown">Answers</th>
+        <th data-key="noGuess">No guess</th>
+        <th data-key="medianRatio">Median guess ÷ answer</th>
+        <th data-key="withinTenTimes">Within 10×</th>
+        <th data-key="medianPctOff">Median % off</th>
+        <th data-key="exact">Exact</th>
+        <th data-key="within3">Within 3%</th>
+        <th data-key="within10">Within 10%</th>
+        <th data-key="flagCount">Review</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <section id="detail" class="detail" hidden>
+    <h2 id="detailTitle"></h2>
+    <p id="summary" class="summary"></p>
+    <div class="section">
+      <h3>Where the guesses landed (log scale)</h3>
+      <div id="strip"></div>
+      <p id="stripNote" class="strip-note"></p>
+    </div>
+    <div class="section">
+      <h3>Day by day</h3>
+      <table>
+        <thead><tr><th>Day</th><th>Answers</th><th>Avg % off</th></tr></thead>
+        <tbody id="dailyRows"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<script>
+  // Rules for marking a question for review. A flag is only a prompt to look at the question, never a
+  // reason to remove it on its own. Rates are fractions of all answers shown (0.25 = 25%).
+  // A question needs at least MIN_ANSWERS before any rule applies, so a few early answers can't flag it.
+  const RULES = {
+    MIN_ANSWERS: 30,
+    NO_GUESS_RATE: 0.25,     // too many players skip it: confusing, or the wording is off
+    MEDIAN_PCT_OFF: 3.0,     // median miss over 300%: catches guesses far too HIGH (% off has no upper bound)
+    EXACT_RATE: 0.10,        // over 10% exact: the answer is too well known to be a real estimate
+    WITHIN_3_RATE: 0.10,     // over 10% within 3%: most players can nail it, so it's too easy
+    WITHIN_TEN_TIMES_RATE: 0.5 // under 50% within 10x: catches guesses far too LOW too (% off alone can't)
+  };
+  let questions = [];
+  let sortKey = 'shown';
+  let sortDesc = true;
+
+  // Returns the reasons a question is marked for review, or an empty list. Only the stated rules are checked.
+  function flagsFor(q){
+    if(q.shown < RULES.MIN_ANSWERS) return [];
+    const reasons = [];
+    if(q.noGuess / q.shown > RULES.NO_GUESS_RATE) reasons.push('No-guess rate over 25%');
+    if(q.medianPctOff !== null && q.medianPctOff > RULES.MEDIAN_PCT_OFF) reasons.push('Median % off over 300%');
+    if(q.exact / q.shown > RULES.EXACT_RATE) reasons.push('Exact over 10%');
+    if(q.within3 / q.shown > RULES.WITHIN_3_RATE) reasons.push('Within 3% over 10%');
+    if(q.withinTenTimes !== null && q.withinTenTimes < RULES.WITHIN_TEN_TIMES_RATE) reasons.push('Under 50% within 10× the answer — wrong magnitude');
+    return reasons;
+  }
+
+  function pct(value){
+    if(value === null || value === undefined) return '—';
+    return (value * 100).toFixed(1) + '%';
+  }
+  function share(part, total){
+    if(!total) return '—';
+    return Math.round((part / total) * 100) + '%';
+  }
+  function times(value){
+    if(value === null || value === undefined) return '—';
+    return value.toFixed(2) + '×';
+  }
+
+  function sorted(){
+    const list = questions.map(q => ({...q, flagCount: flagsFor(q).length}));
+    list.sort((a, b) => {
+      const x = a[sortKey] ?? -Infinity;
+      const y = b[sortKey] ?? -Infinity;
+      if(typeof x === 'string') return sortDesc ? y.localeCompare(x) : x.localeCompare(y);
+      return sortDesc ? y - x : x - y;
+    });
+    return list;
+  }
+
+  function render(){
+    const body = document.getElementById('rows');
+    body.textContent = '';
+    for(const q of sorted()){
+      const tr = document.createElement('tr');
+      tr.className = 'row';
+      tr.addEventListener('click', () => showDetail(q));
+      const reasons = flagsFor(q);
+      const cells = [
+        q.text,
+        q.shown,
+        share(q.noGuess, q.shown),
+        times(q.medianRatio),
+        q.withinTenTimes === null ? '—' : Math.round(q.withinTenTimes * 100) + '%',
+        pct(q.medianPctOff),
+        share(q.exact, q.shown),
+        share(q.within3, q.shown),
+        share(q.within10, q.shown),
+        reasons.length ? 'Review: ' + reasons.join('; ') : ''
+      ];
+      for(const [i, value] of cells.entries()){
+        const td = document.createElement('td');
+        if(i === 0) td.className = 'q';
+        if(i === 9 && reasons.length) td.className = 'review';
+        td.textContent = String(value);
+        tr.appendChild(td);
+      }
+      body.appendChild(tr);
+    }
+  }
+
+  // Short number for labels, like 1.2M or 4.5B.
+  function compact(n){
+    const abs = Math.abs(n);
+    if(abs >= 1e12) return n.toExponential(1).replace('+', '');
+    if(abs >= 1e9) return (n / 1e9).toFixed(abs >= 1e10 ? 0 : 1) + 'B';
+    if(abs >= 1e6) return (n / 1e6).toFixed(abs >= 1e7 ? 0 : 1) + 'M';
+    if(abs >= 1e3) return (n / 1e3).toFixed(abs >= 1e4 ? 0 : 1) + 'K';
+    return String(Math.round(n * 10) / 10);
+  }
+
+  // Plain-English reading of the median guess and how many guesses are within ten times the answer.
+  function summaryFor(q, values, answer, label){
+    const unit = label ? ' ' + label : '';
+    const positive = values.filter(v => v > 0);
+    if(values.length === 0 || answer === null || answer <= 0){
+      return 'Not enough guesses to summarise yet.';
+    }
+    const sortedValues = positive.slice().sort((a, b) => a - b);
+    const median = sortedValues.length ? sortedValues[Math.floor(sortedValues.length / 2)] : null;
+    const ratio = median === null ? null : median / answer;
+    const tenX = positive.filter(v => v <= answer * 10 && v >= answer / 10).length;
+    const tenShare = Math.round((tenX / values.length) * 100);
+    let verdict;
+    if(ratio === null) verdict = 'Most guesses were zero, so there is no typical guess.';
+    else if(ratio >= 2) verdict = 'The median guess is <b>' + ratio.toFixed(1) + ' times too high</b>. Many players may be working in the wrong range.';
+    else if(ratio <= 0.5) verdict = 'The median guess is <b>' + (1 / ratio).toFixed(1) + ' times too low</b>. Many players may be working in the wrong range.';
+    else verdict = 'The median guess is <b>in the right range</b> (within two times the answer).';
+    return verdict + ' The correct answer is ' + compact(answer) + unit + '. ' +
+      tenShare + '% of guesses are within ten times the answer.';
+  }
+
+  // Strip on a log scale. The box covers the middle half of guesses, the whiskers cover the 5th to 95th
+  // percentile, the tick is the median, and the green line is the correct answer. Every guess is counted
+  // in the percentiles, so far-off guesses stay visible as whisker length rather than being cut off.
+  function drawStrip(values, answer, label){
+    const box = document.getElementById('strip');
+    const note = document.getElementById('stripNote');
+    box.textContent = '';
+    const positive = values.filter(v => v > 0).sort((a, b) => a - b);
+    const zeros = values.length - positive.length;
+    if(positive.length < 2 || answer === null || answer <= 0){
+      note.textContent = 'Not enough positive guesses to draw this yet.';
+      return;
+    }
+    const at = p => positive[Math.min(positive.length - 1, Math.floor(p * positive.length))];
+    const logOf = v => Math.log10(v);
+    const p5 = logOf(at(0.05)), p25 = logOf(at(0.25)), med = logOf(at(0.5)), p75 = logOf(at(0.75)), p95 = logOf(at(0.95));
+    const logAnswer = logOf(answer);
+    const lo = Math.floor(Math.min(p5, logAnswer)) - 0.2;
+    const hi = Math.ceil(Math.max(p95, logAnswer)) + 0.2;
+
+    const W = 600, H = 150, pad = 28;
+    const plotW = W - pad * 2;
+    const mid = H / 2 - 6;
+    const x = z => pad + ((z - lo) / (hi - lo)) * plotW;
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.setAttribute('width', '100%');
+
+    const el = (name, attrs) => {
+      const node = document.createElementNS(NS, name);
+      for(const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
+      svg.appendChild(node);
+      return node;
+    };
+    // Whiskers: 5th to 95th percentile.
+    el('line', {x1: x(p5), x2: x(p95), y1: mid, y2: mid, stroke: '#a2a7e5', 'stroke-width': 2});
+    el('line', {x1: x(p5), x2: x(p5), y1: mid - 10, y2: mid + 10, stroke: '#a2a7e5', 'stroke-width': 2});
+    el('line', {x1: x(p95), x2: x(p95), y1: mid - 10, y2: mid + 10, stroke: '#a2a7e5', 'stroke-width': 2});
+    // Box: middle half of guesses.
+    el('rect', {x: x(p25), y: mid - 18, width: Math.max(2, x(p75) - x(p25)), height: 36, fill: '#7acaf6', opacity: 0.85, rx: 4});
+    // Median tick.
+    el('line', {x1: x(med), x2: x(med), y1: mid - 18, y2: mid + 18, stroke: '#0f1237', 'stroke-width': 3});
+    // Correct answer.
+    el('line', {x1: x(logAnswer), x2: x(logAnswer), y1: 18, y2: H - 30, stroke: '#65c853', 'stroke-width': 3});
+    // Axis: one label per power of ten in range.
+    el('line', {x1: pad, x2: W - pad, y1: H - 30, y2: H - 30, stroke: '#a2a7e5'});
+    for(let p = Math.ceil(lo); p <= Math.floor(hi); p++){
+      const text = el('text', {x: x(p), y: H - 10, 'text-anchor': 'middle', fill: '#a2a7e5', 'font-size': 12});
+      text.textContent = compact(Math.pow(10, p)) + (label ? ' ' + label : '');
+    }
+    box.appendChild(svg);
+    note.textContent = 'Box: middle half of guesses. Whiskers: 5th to 95th percentile. Dark tick: median. Green line: correct answer. ' +
+      positive.length + ' guesses plotted' + (zeros ? ', ' + zeros + ' guess(es) of zero not plotted' : '') + '.';
+  }
+
+  async function showDetail(q){
+    const [dailyRes, distRes] = await Promise.all([
+      fetch('/api/admin/question-stats/' + encodeURIComponent(q.id) + '/daily'),
+      fetch('/api/admin/question-stats/' + encodeURIComponent(q.id) + '/distribution')
+    ]);
+    const { days } = await dailyRes.json();
+    const { values, answer, label } = await distRes.json();
+    document.getElementById('detailTitle').textContent = q.text;
+    document.getElementById('summary').innerHTML = summaryFor(q, values, answer, label);
+    drawStrip(values, answer, label);
+    const body = document.getElementById('dailyRows');
+    body.textContent = '';
+    for(const d of days){
+      const tr = document.createElement('tr');
+      for(const value of [d.day, d.shown, pct(d.avgPctOff)]){
+        const td = document.createElement('td');
+        td.textContent = String(value);
+        tr.appendChild(td);
+      }
+      body.appendChild(tr);
+    }
+    document.getElementById('detail').hidden = false;
+  }
+
+  document.querySelectorAll('th[data-key]').forEach(th => {
+    th.addEventListener('click', () => {
+      const key = th.dataset.key;
+      if(sortKey === key) sortDesc = !sortDesc;
+      else { sortKey = key; sortDesc = true; }
+      render();
+    });
+  });
+
+  (async () => {
+    const status = document.getElementById('status');
+    try {
+      const res = await fetch('/api/admin/question-stats');
+      if(!res.ok) throw new Error('Could not load stats (' + res.status + ').');
+      const data = await res.json();
+      questions = data.questions;
+      status.textContent = questions.length ? '' : 'No answers recorded yet.';
+      document.getElementById('table').hidden = questions.length === 0;
+      render();
+    } catch (err) {
+      status.className = 'error';
+      status.textContent = err.message;
+    }
+  })();
+</script>
+</body>
+</html>
