@@ -9,7 +9,12 @@
 
 import { mountChrome } from '../social/chrome.js';
 import { escapeHtml } from './ui.js';
-import { displayName } from './trivia.js';
+import { displayName, dailyKey } from './trivia.js';
+
+/** Whether today's daily has already been played, from the flag js/ui.js's startSolo sets on finishing it. */
+function dailyPlayed(){
+  try{ return localStorage.getItem(`dailyPlayed:${dailyKey()}`) === '1'; } catch { return false; }
+}
 
 const app = /** @type {HTMLElement} */ (document.getElementById('app'));
 
@@ -89,8 +94,8 @@ function render(me){
       </div>
       <p class="menu-signed">Signed in as <b>${escapeHtml(displayName(me.username))}</b> · Rating <b class="mono">${me.elo}</b></p>
       <div class="challenges" id="challenges"></div>
-      <a class="btn lime big" href="/solo.html?daily=1">Play the Daily</a>
       <a class="btn primary yellow big" href="/lobby/lobby.html?mode=ranked">Play Ranked</a>
+      <a class="btn ${dailyPlayed() ? 'panel' : 'lime'} big" href="/solo.html?daily=1">Play the Daily</a>
       <a class="btn panel big" href="/lobby/lobby.html?mode=friends">Play with friends</a>
       <a class="btn panel big" href="/solo.html">Practice vs Bots</a>
       <button class="btn panel big" id="logoutBtn">Log out</button>

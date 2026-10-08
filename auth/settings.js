@@ -3,7 +3,7 @@
 // Google-only accounts already have an email from Google and have no password to confirm
 // a change with, so the current-password field only shows up for password accounts.
 
-import { mountChrome } from '../social/chrome.js';
+import { mountChrome, addPasswordToggle } from '../social/chrome.js';
 
 const app = /** @type {HTMLElement} */ (document.getElementById('app'));
 
@@ -53,6 +53,8 @@ function render(){
 
   const form = /** @type {HTMLFormElement} */ (document.getElementById('emailForm'));
   form.addEventListener('submit', handleSubmit);
+  const currentPasswordInput = document.getElementById('currentPassword');
+  if(currentPasswordInput) addPasswordToggle(/** @type {HTMLInputElement} */ (currentPasswordInput));
 }
 
 /** @param {SubmitEvent} e */

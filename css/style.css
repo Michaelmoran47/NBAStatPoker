@@ -10,6 +10,8 @@
   --muted:#a2a7e5;
   --yellow:#fffa0b;
   --gold:#f5b301;
+  --silver:#d7dee6;
+  --bronze:#d9965a;
   --accent:#7acaf6;
   --green:#65c853;
   --red:#ff4d4d;
@@ -137,6 +139,7 @@ h1{ font-family:var(--font-display); font-weight:400; text-transform:uppercase; 
 
 .closeness{ list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:8px; }
 .closeness .row{
+  position:relative; overflow:hidden;
   display:grid; grid-template-columns:34px 1fr auto; gap:10px; align-items:center;
   padding:10px 14px; border-radius:16px; background:var(--card-2);
 }
@@ -145,15 +148,47 @@ h1{ font-family:var(--font-display); font-weight:400; text-transform:uppercase; 
 .who-name{ font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .who-guess{ font-size:.82em; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dist{ font-family:var(--font-display); font-size:1em; }
-.closeness .row.gold{ background:var(--gold); color:var(--ink); box-shadow:0 4px 0 #b8860b; }
-.closeness .row.gold .pos{ color:var(--ink); }
-.closeness .row.gold .who-guess{ color:#5a4300; }
-.closeness .row.green{ background:var(--green); color:var(--ink); box-shadow:0 4px 0 #2f9e57; }
-.closeness .row.green .pos{ color:var(--ink); }
-.closeness .row.green .who-guess{ color:#0f4a25; }
-.closeness .row.yellow{ background:var(--yellow); color:var(--ink); box-shadow:0 4px 0 #b2aa00; }
-.closeness .row.yellow .pos{ color:var(--ink); }
-.closeness .row.yellow .who-guess{ color:#5a4300; }
+/* Each tier just names its color; the sliding fill bar / edge mark below (shared with .review-guess)
+   reads it. gold/silver/bronze are rank-scored placements (multiplayer and bot games); green/yellow/
+   orange are the daily's closeness bands. */
+.row.gold, .review-guess.gold{ --tier-color:var(--gold); }
+.row.silver, .review-guess.silver{ --tier-color:var(--silver); }
+.row.bronze, .review-guess.bronze{ --tier-color:var(--bronze); }
+.row.green, .review-guess.green{ --tier-color:var(--green); }
+.row.yellow, .review-guess.yellow{ --tier-color:var(--yellow); }
+.row.orange, .review-guess.orange{ --tier-color:var(--orange); }
+
+/* The colored highlight behind a daily result row: a translucent bar that slides in from the left and
+   stops at the share of that round's max the guess actually earned (so text always sits on a mix of
+   the dark row background and a tinted overlay, never a fully solid bright color — avoids needing a
+   different text color per tier, which broke down once the fill stopped being the whole row).
+   Driven by JS (see wireTierFills in js/ui.js) flipping --fill from 0 to its target a frame after
+   insertion, the same two-step technique the countdown timer bar uses — a plain CSS @keyframes
+   `to{ transform:scaleX(var(--fill)) }` does not reliably pick up a per-element custom property set
+   via inline style, confirmed live (it resolves fine as a static transform, just not inside a
+   keyframe), so this uses an ordinary transition instead. */
+.row .tier-fill, .review-guess .tier-fill{
+  position:absolute; inset:0; z-index:0; border-radius:inherit;
+  transform-origin:left center; transform:scaleX(var(--fill, 0));
+  background:var(--tier-color, transparent); opacity:.85;
+  transition:transform .7s cubic-bezier(.22,.9,.3,1);
+}
+/* The rank-scored place marker: just a thin colored strip along the left edge, not a fill — place
+   isn't a share of anything, so coloring in the row like a progress bar doesn't mean anything there. */
+.row .tier-edge, .review-guess .tier-edge{
+  position:absolute; inset:0; z-index:0; width:5px; border-radius:inherit;
+  background:var(--tier-color, transparent);
+}
+/* A dark text-shadow keeps the row's always-light text readable over a bright, mostly-opaque tier
+   color (gold/yellow especially) without needing a different text color per tier. Only the fill bar
+   needs this — the edge mark is only a few pixels wide, so the rest of the row stays on its normal
+   dark background. */
+.row > *:not(.tier-fill):not(.tier-edge), .review-guess > *:not(.tier-fill):not(.tier-edge){
+  position:relative; z-index:1;
+}
+.row:has(.tier-fill) > *:not(.tier-fill), .review-guess:has(.tier-fill) > *:not(.tier-fill){
+  text-shadow:0 1px 3px rgba(0,0,0,.5);
+}
 .legend{ margin:14px 0 0; font-size:.8em; color:var(--muted); text-align:center; font-weight:600; }
 .key{ display:inline-block; width:12px; height:12px; border-radius:999px; margin:0 4px 0 12px; vertical-align:middle; }
 .key:first-child{ margin-left:0; }
@@ -173,6 +208,16 @@ h1{ font-family:var(--font-display); font-weight:400; text-transform:uppercase; 
 .g-guess{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); }
 .guess-list li.win .g-guess{ color:#5a4300; }
 .g-rank, .g-dist{ text-align:right; font-family:var(--font-mono); font-size:.9em; }
+/* The match-total pill on the final standings: a dark translucent panel with a bright inset shadow on
+   top and a faint highlight along the bottom edge, so the pill reads as pressed into the row rather
+   than sitting on top of it. Background stays translucent (not a solid dark color) so it still works
+   over the winner row's bright yellow background, not just the normal card-2 rows. */
+.g-pts{
+  justify-self:end; display:inline-block; padding:4px 10px; border-radius:999px;
+  font-size:.85em; white-space:nowrap; background:rgba(0,0,0,.28);
+  box-shadow:inset 0 2px 4px rgba(0,0,0,.55), inset 0 -1px 0 rgba(255,255,255,.12);
+}
+.guess-list li.win .g-pts{ background:rgba(0,0,0,.18); }
 
 /* ---------- Start / lobby ---------- */
 .start-card{ display:flex; flex-direction:column; gap:14px; align-items:stretch; text-align:center; }
@@ -268,7 +313,6 @@ h1{ text-shadow:none; }
 .question-card{ transform:none; box-shadow:none; background:var(--yellow); }
 .question{ font-size:1.05em; }
 .guess-card, .result-card, .start-card{ box-shadow:none; }
-.closeness .row.gold, .closeness .row.green, .closeness .row.yellow{ box-shadow:none; }
 .winner-tag{ box-shadow:none; }
 .mode-card, .mode-card:nth-child(1), .mode-card:nth-child(2){ transform:none; box-shadow:none; }
 .mode-card:hover{ transform:none; opacity:.9; }
@@ -279,8 +323,8 @@ h1{ text-shadow:none; }
 .timer-fill{ height:100%; width:100%; background:var(--accent); transform-origin:left center; transform:scaleX(1); }
 .result-card .timer-fill{ background:var(--yellow); }
 
-/* ---------- Final standings: place badge first, then name and points ---------- */
-.guess-list.standings li{ grid-template-columns:44px 1fr auto; }
+/* ---------- Final standings: place badge first, then name, rating change, and points ---------- */
+.guess-list.standings li{ grid-template-columns:44px 1fr auto auto; gap:10px; }
 .guess-list.standings .g-rank{ text-align:center; }
 .place-num{ font-family:var(--font-display); font-size:1em; }
 .medal{ width:30px; height:39px; display:block; margin:0 auto; }
@@ -516,6 +560,15 @@ textarea.cc-input{ border-radius:14px; height:auto; padding:10px 16px; resize:ve
 .cc-field{ display:flex; flex-direction:column; gap:6px; text-align:left; }
 .cc-field label{ font-size:.75em; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
 
+/* Wraps a password input with a show/hide eye button, added via social/chrome.js's
+   addPasswordToggle(). The wrapper replaces the input in the flex layout, so it needs its own
+   full-width rule — the input itself no longer stretches on its own once it's not a direct
+   flex child of the field. */
+.pw-wrap{ position:relative; display:block; width:100%; }
+.pw-wrap input{ width:100%; padding-right:42px; }
+.pw-toggle{ position:absolute; right:4px; top:50%; transform:translateY(-50%); background:none; border:none; padding:6px; display:flex; cursor:pointer; color:var(--muted); }
+.pw-toggle:hover{ color:var(--text); }
+
 .cc-list{ display:flex; flex-direction:column; }
 .cc-row{ display:flex; align-items:center; gap:12px; padding:10px 2px; border-bottom:1px solid var(--card-2); }
 .cc-row:last-child{ border-bottom:0; }
@@ -616,18 +669,20 @@ textarea.cc-input{ border-radius:14px; height:auto; padding:10px 16px; resize:ve
 .review-answer{ margin:0; color:var(--muted); font-size:.92em; }
 .review-answer b{ color:var(--yellow); }
 .review-guesses{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
-.review-guess{ display:grid; grid-template-columns:1fr auto auto; gap:10px; align-items:center; padding:8px 12px; border-radius:12px; background:var(--card-2); color:var(--text); }
-.review-guess.gold{ background:var(--gold); color:var(--ink); }
-.review-guess.green{ background:var(--green); color:var(--ink); }
-.review-guess.yellow{ background:var(--yellow); color:var(--ink); }
+.review-guess{
+  position:relative; overflow:hidden;
+  display:grid; grid-template-columns:1fr auto auto; gap:10px; align-items:center;
+  padding:8px 12px; border-radius:12px; background:var(--card-2); color:var(--text);
+}
 .review-name{ font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .review-value{ font-size:.9em; }
 .review-pts{ font-size:.85em; opacity:.85; }
 
-/* Daily score: one big percentage, the round emojis, and a share button */
+/* Daily score: one big point total, the round emojis, and a share button */
 .daily-score{ align-items:center; text-align:center; gap:12px; }
 .daily-label{ margin:0; font-family:var(--font-display); text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-size:.9em; }
 .daily-pct{ margin:0; font-family:var(--font-display); font-weight:700; font-size:4.5em; line-height:1; color:var(--yellow); }
+.daily-pct .daily-max{ font-size:.4em; color:var(--muted); font-weight:600; }
 .daily-emojis{ margin:0; font-size:1.8em; letter-spacing:.1em; }
 
 /* The question drops into place when a new round starts */

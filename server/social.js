@@ -16,7 +16,9 @@ import { createLimiter, limitRoute, userOrIp } from './rate-limit.js';
 const MAX_USERNAME_LENGTH = 200;
 const RECENT_MATCH_LIMIT = 10;
 
-const findUserByName = db.prepare('SELECT id, username, elo FROM users WHERE username = ?');
+// COLLATE NOCASE to match server/auth.js's login lookup — searching, adding, or viewing a
+// profile by username shouldn't care about capitalization any more than logging in does.
+const findUserByName = db.prepare('SELECT id, username, elo FROM users WHERE username = ? COLLATE NOCASE');
 const findUserById = db.prepare('SELECT id, username, elo FROM users WHERE id = ?');
 const findPair = db.prepare('SELECT user_a, user_b, status, requested_by FROM friendships WHERE user_a = ? AND user_b = ?');
 const insertPending = db.prepare("INSERT INTO friendships (user_a, user_b, status, requested_by) VALUES (?, ?, 'pending', ?)");

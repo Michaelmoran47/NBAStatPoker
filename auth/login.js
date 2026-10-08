@@ -3,6 +3,8 @@
 // the lobby (phase 2) gives this a real reason to exist. Same template-string render
 // pattern as the game's own ui.js: rebuild the #app HTML from a small state object.
 
+import { addPasswordToggle } from '../social/chrome.js';
+
 const app = /** @type {HTMLElement} */ (document.getElementById('app'));
 
 // A friend's invite link (?invite=CODE) opens straight to the sign-up form and carries the code along.
@@ -93,6 +95,7 @@ function render(){
 
   const form = /** @type {HTMLFormElement} */ (document.getElementById('authForm'));
   form.addEventListener('submit', handleSubmit);
+  addPasswordToggle(/** @type {HTMLInputElement} */ (document.getElementById('password')));
 
   if(googleClientId) renderGoogleButton();
 }

@@ -18,12 +18,44 @@ const ICON = {
   play: '<path d="M8 5v14l11-7z" fill="currentColor"/>',
   profile: '<circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
   friends: '<circle cx="9" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M2.5 20c1-3.5 3.5-5 6.5-5s5.5 1.5 6.5 5M16 4.5a3.5 3.5 0 010 7M21.5 20c-.6-2.3-2-3.8-4-4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
-  leaderboard: '<path d="M4 20V11h5v9M9.5 20V5h5v15M15 20v-7h5v7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>'
+  leaderboard: '<path d="M4 20V11h5v9M9.5 20V5h5v15M15 20v-7h5v7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/>',
+  eyeOff: '<path d="M3 3l18 18M10.6 10.6a3 3 0 004.24 4.24M6.5 6.7C4 8.3 2 12 2 12s3.5 7 10 7c1.9 0 3.5-.4 4.9-1.1M17.4 17.4C19.8 15.8 22 12 22 12s-1-2-3-3.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
 };
 
 /** @param {keyof typeof ICON} name @param {number} [size] */
 function svg(name, size = 20){
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
+}
+
+/**
+ * Adds a show/hide eye button next to a password field, toggling its type between
+ * "password" and "text". Wraps the input in a positioning span rather than requiring every
+ * page to build that markup itself. Call once per field, right after it's in the DOM — a
+ * re-render that rebuilds the input (the template-string pattern every page here uses) needs
+ * a fresh call, since the old input (and its wrapper) is gone.
+ * @param {HTMLInputElement} input
+ */
+export function addPasswordToggle(input){
+  if(input.type !== 'password') return;
+  const wrap = document.createElement('span');
+  wrap.className = 'pw-wrap';
+  input.replaceWith(wrap);
+  wrap.appendChild(input);
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'pw-toggle';
+  btn.setAttribute('aria-label', 'Show password');
+  btn.innerHTML = svg('eye', 20);
+  wrap.appendChild(btn);
+
+  btn.addEventListener('click', () => {
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+    btn.innerHTML = svg(show ? 'eyeOff' : 'eye', 20);
+  });
 }
 
 /** @typedef {'play'|'profile'|'friends'|'leaderboard'} Section */

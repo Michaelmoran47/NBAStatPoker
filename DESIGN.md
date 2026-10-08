@@ -43,7 +43,7 @@ Colour is the main signal for how a guess landed. Always pair it with a word or 
 - **Cards (`.start-card`, `.guess-card`, `.result-card`):** `--card` with 20px radius. No shadow.
 
 - **Round results:** after each round the correct answer and every guess are shown, closest first, each with its round points (10, 6, 3, 1 by place; the daily shows a percentage). Practice and multiplayer then move on after a 4.5-second pause (`ROUND_RESULT_MS` in `js/engine.js`, shared by solo and the server). The daily has no countdown: a Next question button (See results after round 5) moves on. Full answers and guesses are also reviewed at game over: placings first, then a scrollable round-by-round review.
-- **Daily score:** one large percentage with one decimal (points out of the most available), then a share text like "Quantrivia #1 — 50.4%", one line per round with its keycap number, a result emoji and the round percentage, and "quantrivia.com". Result emojis: 🏆 exact, 🟩 within 3%, 🟨 within 10%, ⬜ otherwise.
+- **Daily score:** one large point total out of the most available (e.g. "420 / 500", the max shown smaller), then a share text like "Quantrivia #1 — 420/500 pts", one line per round with its keycap number, a result emoji, and that round's points. Result emojis are tied to the fraction of that round's max earned, not raw percent-off (so they track the actual scoring curve, including partial credit for an order-of-magnitude estimate): 🏆 exact, 🟩 90%+, 🟨 60%+, 🟧 any credit from the log-scale tail, ⬜ zero or no answer.
 
 ## Navigation
 
@@ -51,9 +51,9 @@ Colour is the main signal for how a guess landed. Always pair it with a word or 
 - **Phone:** a fixed tab bar with Play, Profile, Friends, and Leaderboard. Pages add bottom padding so content isn't hidden behind it. The sidebar is never shown on phones.
 - **Desktop:** the same four destinations in a collapsible sidebar. It starts open, and the choice is remembered once the player toggles it.
 - **Home:** one loud primary button ("Play Ranked"), with the secondary options (friends, practice) set quieter below it, the way chess.com puts "Play" first.
-- **Play the Daily:** a filled palette-green button above Play Ranked. It is a solo challenge with no CPU opponents: the same five questions for everyone on the day (UTC date), and the goal is to score as many points as possible. There is no time limit: each round waits until you lock in.
+- **Play the Daily:** a filled palette-green button below Play Ranked. It is a solo challenge with no CPU opponents: the same five questions for everyone on the day (UTC date), and the goal is to score as many points as possible. There is no time limit: each round waits until you lock in. The green highlight means "you haven't played today's yet" — once you finish it, the button switches to the same quiet panel look as Play with friends/Practice vs Bots, for the rest of that UTC day. This is tracked client-side only (`localStorage`, keyed by the day), since solo games including the daily are never reported to the server at all.
 - **During a match:** the tab bar and sidebar are hidden (`body.in-game`). The top bar stays so help and back still work.
-- **Landing:** signed-out visitors see the logo, the tagline "a numbers based trivia game", and two pill buttons: Log in and Sign up (playing needs an account, so there's no Play button here). Signed-in players land on the main menu: Play the Daily (solo, same questions for everyone), Play Ranked (ranked queue), Play with friends (lobby), Practice vs Bots (solo).
+- **Landing:** signed-out visitors see the logo, the tagline "a numbers based trivia game", and two pill buttons: Log in and Sign up (playing needs an account, so there's no Play button here). Signed-in players land on the main menu: Play Ranked (ranked queue), Play the Daily (solo, same questions for everyone, highlighted until played), Play with friends (lobby), Practice vs Bots (solo).
 - **Back navigation:** inside the lobby, the room and ranked-queue screens each have their own back arrow. Room back means leave the room, and queue back means cancel the search.
 
 ## Motion

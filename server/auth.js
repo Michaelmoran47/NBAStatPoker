@@ -28,14 +28,17 @@ const insertGoogleUser = db.prepare(
   'INSERT INTO users (username, google_id, email) VALUES (?, ?, ?)'
 );
 const findAccountById = db.prepare('SELECT elo, email, password_hash FROM users WHERE id = ?');
+// COLLATE NOCASE so "Alice" and "alice" are the same account for both login and uniqueness —
+// otherwise two players could end up with confusingly near-identical usernames, and a player who
+// doesn't remember how they capitalized their own name couldn't log in.
 const findUserByUsername = db.prepare(
-  'SELECT id, username, password_hash FROM users WHERE username = ?'
+  'SELECT id, username, password_hash FROM users WHERE username = ? COLLATE NOCASE'
 );
 const findUserByGoogleId = db.prepare(
   'SELECT id, username FROM users WHERE google_id = ?'
 );
 const usernameExists = db.prepare(
-  'SELECT 1 FROM users WHERE username = ?'
+  'SELECT 1 FROM users WHERE username = ? COLLATE NOCASE'
 );
 // Only password accounts need a unique email — it's how forgot-password finds the right
 // account. A Google-only account's email comes from Google and isn't checked against this.

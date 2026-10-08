@@ -11,7 +11,7 @@ import { sleep } from './utils.js';
 // so the result timer hands straight over to the next round.
 export const QUESTION_PAUSE_MS = 0;
 // How long a round's answer and guesses stay up before the next question. The daily waits for a button.
-export const ROUND_RESULT_MS = 4500;
+export const ROUND_RESULT_MS = 7500;
 
 /**
  * @typedef {Object} DriverOptions

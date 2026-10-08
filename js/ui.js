@@ -4,7 +4,7 @@
 // the match driver here. The multiplayer lobby (lobby/lobby.js) calls renderGame() with server views.
 // Both get the same markup.
 
-import { UNITS, ROUNDS, MAX_POINTS, parseNumber, makeGuess, formatNumber, formatRounded, pickQuestions, seededRandom, dailyKey, dailyNumber, makeGame, submitGuess, viewFor } from './trivia.js';
+import { UNITS, ROUNDS, MAX_POINTS, RANK_POINTS, parseNumber, makeGuess, formatNumber, formatRounded, pickQuestions, seededRandom, dailyKey, dailyNumber, makeGame, submitGuess, viewFor } from './trivia.js';
 import { QUESTIONS } from './questions.js';
 import { playGame, ROUND_RESULT_MS } from './engine.js';
 
@@ -75,25 +75,87 @@ function eloCell(deltas, id){
 }
 
 /**
- * Closeness tier. Gold is an exact answer, green is within 3% of the true answer, and yellow is within 10%.
- * @param {number|null} pctOff
+ * A player's match total on the final standings, styled as a recessed pill (see .g-pts in
+ * style.css) rather than plain text so it reads as a little carved-in readout next to the rank badge.
+ * @param {number} totalPoints
  */
-function tierOf(pctOff){
-  if(pctOff === null) return '';
-  if(pctOff === 0) return 'gold';
-  if(pctOff <= 0.03) return 'green';
-  if(pctOff <= 0.10) return 'yellow';
+function pointsCell(totalPoints){
+  return `<span class="g-pts mono">${totalPoints} pts</span>`;
+}
+
+/**
+ * Which highlight a guess earns on the results list and the end-of-match review, or '' for no
+ * highlight.
+ *
+ * Rank-scored rounds (ranked, practice — i.e. multiplayer and bot games) tier by place, matching the
+ * medal colors used on the final standings: gold for 1st, silver for 2nd, bronze for 3rd, nothing for
+ * 4th. Unlike the daily's tiers below, this isn't meant to fill in the row — see tierFillHtml.
+ *
+ * The daily tiers by points-fraction bands matching closenessEmoji's own cutoffs, so the row color and
+ * the round emoji always agree with each other.
+ * @param {import('./trivia.js').RoundEntry} e
+ * @param {ReturnType<typeof viewFor>} view
+ */
+function tierOf(e, view){
+  if(view.scoring === 'rank'){
+    if(e.points >= RANK_POINTS[0]) return 'gold';
+    if(e.points >= RANK_POINTS[1]) return 'silver';
+    if(e.points >= RANK_POINTS[2]) return 'bronze';
+    return '';
+  }
+  const frac = fractionOf(e, view);
+  if(frac >= 1) return 'gold';
+  if(frac >= 0.9) return 'green';
+  if(frac >= 0.5) return 'yellow';
+  if(frac > 0) return 'orange';
   return '';
 }
 
 /**
- * How a round's points read on the results: a percentage for the daily (closeness scoring), and plain
- * points for practice and multiplayer (place scoring).
- * @param {number} points
+ * Points as a fraction of that round's own max — RANK_POINTS[0] for rank-scored rounds, MAX_POINTS
+ * for the daily — 0 to 1. Drives how far the sliding highlight bar on a result row fills.
+ * @param {import('./trivia.js').RoundEntry} e
  * @param {ReturnType<typeof viewFor>} view
  */
-function scoreLabel(points, view){
-  return view.scoring === 'closeness' ? `${Math.round((points / MAX_POINTS) * 100)}%` : `${points} pts`;
+function fractionOf(e, view){
+  const max = view.scoring === 'rank' ? RANK_POINTS[0] : MAX_POINTS;
+  return max > 0 ? Math.min(1, e.points / max) : 0;
+}
+
+/**
+ * The highlight inserted as the first child of a scored result row. Rank-scored rounds (multiplayer
+ * and bot games) just get a thin gold/silver/bronze edge mark for 1st/2nd/3rd place — not a fill, since
+ * place isn't a share of anything. The daily keeps the sliding fill bar, started at --fill:0 (so
+ * there's something to animate from) with the real target stashed in data-fill; wireTierFills() flips
+ * it a frame after insertion so the CSS transition actually plays instead of snapping straight to its
+ * end state.
+ */
+function tierFillHtml(e, view){
+  if(view.scoring === 'rank') return `<span class="tier-edge"></span>`;
+  return `<span class="tier-fill" style="--fill:0" data-fill="${fractionOf(e, view)}"></span>`;
+}
+
+/**
+ * Triggers every unanimated .tier-fill bar under `root` to slide in. Called once after each render
+ * that might contain result rows — a no-op if there are none. Needs a frame to pass between setting
+ * --fill:0 (above) and this, or the browser coalesces both into one style recalc and the transition
+ * never visibly runs; requestAnimationFrame is enough of a gap for that.
+ * @param {ParentNode} root
+ */
+function wireTierFills(root){
+  const bars = /** @type {HTMLElement[]} */ ([...root.querySelectorAll('.tier-fill[data-fill]')]);
+  if(bars.length === 0) return;
+  requestAnimationFrame(() => {
+    for(const bar of bars) bar.style.setProperty('--fill', bar.dataset.fill ?? '0');
+  });
+}
+
+/**
+ * How a round's points read on the results: always the raw point value, for every scoring mode.
+ * @param {number} points
+ */
+function scoreLabel(points){
+  return `${points} pts`;
 }
 
 /**
@@ -110,16 +172,17 @@ function closenessList(r, view){
     return (ax - ay) || nameOf(x.playerId).localeCompare(nameOf(y.playerId));
   });
   const rows = ordered.map(e => {
-    const tier = tierOf(e.pctOff);
+    const tier = tierOf(e, view);
     const detail = e.pctOff === null
       ? (e.guess === null ? 'no answer' : 'not a number')
       : `${escapeHtml(e.value !== null ? formatRounded(e.value) : (e.guess ?? ''))}`;
     return `<li class="row ${tier}">
+      ${tierFillHtml(e, view)}
       <span class="who">
         <span class="who-name">${escapeHtml(nameOf(e.playerId))}</span>
         <span class="who-guess">${detail}</span>
       </span>
-      <span class="dist mono">${scoreLabel(e.points, view)}</span>
+      <span class="dist mono">${scoreLabel(e.points)}</span>
     </li>`;
   }).join('');
   return `<ol class="closeness">${rows}</ol>`;
@@ -152,10 +215,11 @@ function reviewHtml(view){
       const guessText = e.pctOff === null
         ? (e.guess === null ? 'no answer' : 'not a number')
         : escapeHtml(e.value !== null ? formatRounded(e.value) : (e.guess ?? ''));
-      return `<li class="review-guess ${tierOf(e.pctOff)}">
+      return `<li class="review-guess ${tierOf(e, view)}">
+        ${tierFillHtml(e, view)}
         <span class="review-name">${escapeHtml(nameOf(e.playerId))}</span>
         <span class="review-value mono">${guessText}</span>
-        <span class="review-pts mono">${scoreLabel(e.points, view)}</span>
+        <span class="review-pts g-pts mono">${scoreLabel(e.points)}</span>
       </li>`;
     }).join('');
     return `
@@ -173,53 +237,56 @@ function reviewHtml(view){
 }
 
 /**
- * Emoji for how close one guess was: a star for exact, green within 3%, orange within 10%, and a white
- * square for anything further out or no answer.
- * @param {number|null} pctOff
+ * Emoji for how a round scored, as a fraction of MAX_POINTS rather than raw percent-off — the
+ * cutoffs line up with where pointsFor's own curve bends (90% is roughly 5% off; 50% is the exact
+ * seam where the flat near-miss rule hands off to the log-scale tail), so these don't drift out of
+ * sync with the formula the way a second, hand-picked set of percent-off cutoffs would. A trophy
+ * for exact, green for a strong guess, yellow for a solid one, orange for "wrong but in the right
+ * ballpark" (the whole point of the log tail — an order-of-magnitude estimate that still earned
+ * something), and white for no credit or no answer.
+ * @param {number} points
  */
-function closenessEmoji(pctOff){
-  if(pctOff === null) return '⬜';
-  if(pctOff === 0) return '🏆';
-  if(pctOff <= 0.03) return '🟩';
-  if(pctOff <= 0.10) return '🟨';
+function closenessEmoji(points){
+  const frac = points / MAX_POINTS;
+  if(frac >= 1) return '🏆';
+  if(frac >= 0.9) return '🟩';
+  if(frac >= 0.5) return '🟨';
+  if(frac > 0) return '🟧';
   return '⬜';
 }
 
-// Keycap numbers 1 to 5, for the share text.
-const KEYCAPS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
-
 /**
- * The daily score for the viewer: a percentage of the most points available, the round emojis, and the
- * text used for sharing.
+ * The daily score for the viewer: the total points scored out of the most available, the round
+ * emojis, and the text used for sharing. Points, not a percentage — a percentage reads as "how well
+ * did I do out of 100" and invites comparing days with very different average difficulty, where the
+ * raw point total (same MAX_POINTS scale every day) is the more honest number.
+ *
+ * The share text is the minimal Wordle-style grid: the score line, then just the row of emoji
+ * squares with no per-round numbers — short enough to read at a glance in a group chat, which is
+ * what actually gets a result shared instead of typed out and skipped.
  * @param {ReturnType<typeof viewFor>} view
  */
 export function dailyResult(view){
   const mine = view.history.map(r => r.entries.find(e => e.playerId === view.you));
   const points = mine.reduce((sum, e) => sum + (e?.points ?? 0), 0);
-  // The total keeps one decimal place, e.g. 50.4%. Each round's percentage is whole.
-  const pct = Math.round((points / (ROUNDS * MAX_POINTS)) * 1000) / 10;
-  const emojis = mine.map(e => closenessEmoji(e?.pctOff ?? null)).join('');
-  const rounds = mine.map((e, i) => {
-    const roundPct = Math.round(((e?.points ?? 0) / MAX_POINTS) * 100);
-    return `${KEYCAPS[i] ?? ''} ${closenessEmoji(e?.pctOff ?? null)}${roundPct}%`;
-  });
+  const maxPoints = ROUNDS * MAX_POINTS;
+  const emojis = mine.map(e => closenessEmoji(e?.points ?? 0)).join('');
   const text = [
-    `Quantrivia #${dailyNumber()} — ${pct.toFixed(1)}%`,
-    '',
-    ...rounds,
+    `Quantrivia #${dailyNumber()} — ${points}/${maxPoints} pts`,
+    emojis,
     '',
     'quantrivia.com'
   ].join('\n');
-  return { pct, emojis, text };
+  return { points, maxPoints, emojis, text };
 }
 
 /** @param {ReturnType<typeof viewFor>} view */
 function dailySummaryHtml(view){
-  const { pct, emojis } = dailyResult(view);
+  const { points, maxPoints, emojis } = dailyResult(view);
   return `
     <div class="result-card daily-score">
       <p class="daily-label">Daily score</p>
-      <p class="daily-pct mono">${pct.toFixed(1)}%</p>
+      <p class="daily-pct mono">${points} <span class="daily-max">/ ${maxPoints}</span></p>
       <p class="daily-emojis" aria-label="Round results">${emojis}</p>
       <div class="daily-actions">
         <button class="btn" id="copyDailyBtn">Copy to clipboard</button>
@@ -312,6 +379,7 @@ function playingCard(view, opts){
               <span class="g-rank">${placeBadge(s.place)}</span>
               <span class="g-name">${escapeHtml(s.name)}</span>
               ${eloCell(opts.eloDeltas, s.id)}
+              ${pointsCell(s.totalPoints)}
             </li>`).join('')}
         </ul>
       </div>`;
@@ -346,6 +414,7 @@ export function renderGame(view, opts){
     ${playingCard(view, opts)}
     ${view.stage === 'game-over' ? reviewHtml(view) : ''}
     ${opts.extra ?? ''}`;
+  wireTierFills(app);
 
   if(view.stage === 'guessing' && !view.players.find(p => p.id === view.you)?.submitted){
     wireAnswer(opts);
@@ -514,6 +583,13 @@ export async function startSolo(opts = {}){
       paintSolo(G); // show the timer as soon as the window opens
     })
   });
+  // Marks today's daily as played, so the menu button can stop highlighting it. There's no
+  // server record of solo games at all (daily included) — this is the only record that exists.
+  if(soloDaily){
+    try{ localStorage.setItem(`dailyPlayed:${dailyKey()}`, '1'); } catch {
+      // Private windows can refuse storage. Worst case the menu button stays highlighted.
+    }
+  }
   paintSolo(G); // the match is over. The results screen stays up for the player to act on.
 }
 
@@ -552,12 +628,7 @@ function paintSolo(G){
     document.getElementById('shareDailyBtn')?.addEventListener('click', () => { shareText(dailyResult(view).text); });
     document.getElementById('copyDailyBtn')?.addEventListener('click', async (e) => {
       const btn = /** @type {HTMLButtonElement} */ (e.currentTarget);
-      try{
-        await navigator.clipboard.writeText(dailyResult(view).text);
-        btn.textContent = 'Copied!';
-      } catch {
-        btn.textContent = 'Could not copy';
-      }
+      btn.textContent = (await copyText(dailyResult(view).text)) ? 'Copied!' : 'Could not copy';
     });
   }
 }
@@ -577,6 +648,44 @@ export function renderStart(){
       <p class="hint">You against two CPUs. Type a number and pick a unit, from hundred up to quadrillion.</p>
     </div>`;
   document.getElementById('soloBtn')?.addEventListener('click', () => startSolo());
+}
+
+/**
+ * Copies text to the clipboard, falling back to the older execCommand technique when the modern
+ * Clipboard API isn't there at all — which happens on any page that isn't a secure context (HTTPS
+ * or localhost). A bare LAN IP like http://192.168.1.x (how this gets tested from a phone during
+ * local dev) is not secure, so `navigator.clipboard` is simply undefined there and the modern call
+ * throws immediately. Also falls back whenever the modern call exists but still fails for any other
+ * reason (e.g. a NotAllowedError from a clipboard-write permission the browser or page denied) —
+ * not falling through there was the actual bug: a page that merely has `navigator.clipboard` but
+ * can't use it looked identical to one that could, until it quietly failed with no second attempt.
+ * @param {string} text
+ * @returns {Promise<boolean>}
+ */
+async function copyText(text){
+  if(navigator.clipboard && window.isSecureContext){
+    try{
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to the older technique below rather than giving up here.
+    }
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  let ok = false;
+  try{
+    ok = document.execCommand('copy');
+  } catch {
+    ok = false;
+  }
+  document.body.removeChild(textarea);
+  return ok;
 }
 
 /**

@@ -3,6 +3,8 @@
 // just passes straight to the server — it never tries to validate the token itself, since
 // the server is the only place that can check it's unexpired and unused.
 
+import { addPasswordToggle } from '../social/chrome.js';
+
 const app = /** @type {HTMLElement} */ (document.getElementById('app'));
 
 const token = new URLSearchParams(location.search).get('token') ?? '';
@@ -44,6 +46,7 @@ function render(){
 
   const form = /** @type {HTMLFormElement} */ (document.getElementById('resetForm'));
   form.addEventListener('submit', handleSubmit);
+  addPasswordToggle(/** @type {HTMLInputElement} */ (document.getElementById('password')));
 }
 
 /** @param {SubmitEvent} e */

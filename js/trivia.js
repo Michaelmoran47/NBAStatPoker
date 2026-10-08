@@ -4,8 +4,8 @@
 // multiplayer server (server/game-rooms.js) both drive this same code.
 //
 // Each round asks one numeric question. Every player types a number and picks a unit (hundred up to
-// quadrillion). The guess closest to the true answer, as a percentage, wins the round, and ties all win.
-// Points: a perfect guess earns MAX_POINTS. The total drops by 1 point for every 1% off, down to 0.
+// quadrillion). Ranked and practice matches score by place each round — see RANK_POINTS. The daily
+// scores by closeness instead — see pointsFor for exactly how a guess turns into points.
 
 /**
  * A handcrafted question. `answer` is in base units (so "3.5 million" is stored as 3500000).
@@ -61,7 +61,9 @@
  */
 
 export const ROUNDS = 5;
-export const MAX_POINTS = 50;
+// The daily's per-round max (so a perfect daily run is ROUNDS * MAX_POINTS = 500). Only the daily
+// uses this at all — ranked and practice score by place (RANK_POINTS below), not by points.
+export const MAX_POINTS = 100;
 // Practice and multiplayer score by place each round: closest first. Ties share the places they cover.
 // Every guess that gets placed earns points, however far off it is.
 export const RANK_POINTS = [10, 6, 3, 1];
@@ -114,14 +116,53 @@ export function makeGuess(text, unitKey){
   return {text: display ?? String(text ?? '').trim(), unit: unitKey, value};
 }
 
+// Up to this much percent-off, scoring is the original, unmodified "1 point per 1% off" rule,
+// rescaled to whatever MAX_POINTS actually is (POINTS_LOST_RATE=1 means exactly that rate; it's
+// expressed as a rate rather than a literal point value so it stays proportional if MAX_POINTS
+// changes again). NEAR_MISS_POINTS is what that rule gives right at the threshold, which is where
+// the tail below picks up.
+//
+// Widened from 20% to 50% after live testing turned up a real clustering problem: in log-ratio
+// terms (what the tail below uses), "33% off" and "literally double the answer" are nearly the same
+// tiny distance, so a guess like 8 vs an answer of 6 (33% off — a good guess on a small-number
+// question) scored only 59/100, barely different from a guess that was 2x off (53/100). Most normal
+// misses on a tight question land somewhere in the 20%-50% band, and the tail wasn't built to spread
+// that band out — it's built to make 10x-100x-off guesses on huge-scale questions earn *something*,
+// not to carry everyday "a bit off" guesses too. Widening the linear zone covers that band with the
+// one rule that's actually supposed to carry it, and leaves the tail doing only what it was for:
+// order-of-magnitude misses.
+const NEAR_MISS_THRESHOLD = 0.5;
+const POINTS_LOST_RATE = 1;
+const NEAR_MISS_POINTS = MAX_POINTS * (1 - POINTS_LOST_RATE * NEAR_MISS_THRESHOLD);
+// Beyond the threshold, a guess that's wrong by an order of magnitude or more still earns
+// something: points taper off on a log10(guess/answer) scale instead of hitting 0 almost
+// immediately, down to nothing at TAIL_LOG_DECADES decades off (100x, at the default 2).
+// This only matters for the wide-range estimation questions (areas, populations, distances) this
+// threshold was built for — see HANDOFF.md for the reasoning and the graphs that led here.
+const TAIL_LOG_DECADES = 2;
+
 /**
- * Points from a fractional error. Perfect is MAX_POINTS. Each 1% off costs 1 point, floored at 0.
- * @param {number|null} pctOff
+ * Points from a guess. Perfect is MAX_POINTS. Within NEAR_MISS_THRESHOLD (50%) off, points drop at
+ * POINTS_LOST_RATE% of MAX_POINTS per 1% off — the original, unmodified "1 point per 1% off" rule,
+ * just rescaled to whatever MAX_POINTS is. Past that, it switches to a forgiving log-scale tail so
+ * an order-of-magnitude estimate on a huge-scale question still scores something instead of 0.
+ * @param {number|null} value
+ * @param {number} answer
  * @returns {number}
  */
-export function pointsFor(pctOff){
-  if(pctOff === null) return 0;
-  return Math.max(0, Math.round(MAX_POINTS - pctOff * 100));
+export function pointsFor(value, answer){
+  if(value === null) return 0;
+  const ratio = value / answer;
+  const pctOff = Math.abs(ratio - 1);
+  if(pctOff <= NEAR_MISS_THRESHOLD) return Math.max(0, Math.round(MAX_POINTS * (1 - POINTS_LOST_RATE * pctOff)));
+
+  // The threshold sits at a different log-ratio depending on direction (1.2x vs 0.8x), since
+  // percent-off is itself asymmetric that way — the tail picks up from wherever that actually is,
+  // so there's no jump at the seam.
+  const thresholdLogError = Math.abs(Math.log10(ratio > 1 ? 1 + NEAR_MISS_THRESHOLD : 1 - NEAR_MISS_THRESHOLD));
+  const logError = Math.abs(Math.log10(ratio));
+  const frac = (logError - thresholdLogError) / (TAIL_LOG_DECADES - thresholdLogError);
+  return Math.max(0, Math.round(NEAR_MISS_POINTS * (1 - frac)));
 }
 
 /**
@@ -292,7 +333,7 @@ export function finishRound(G){
   /** @type {RoundEntry[]} */
   const entries = measured.map(e => ({
     ...e,
-    points: byPlace ? (byPlace.get(e.playerId) ?? 0) : pointsFor(e.pctOff)
+    points: byPlace ? (byPlace.get(e.playerId) ?? 0) : pointsFor(e.value, question.answer)
   }));
 
   const scored = entries.filter(e => e.pctOff !== null);

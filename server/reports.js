@@ -24,7 +24,7 @@ const REASON_LABELS = {
 const reportLimit = limitRoute(createLimiter({max: 10, windowMs: 60 * 60 * 1000}), userOrIp, 'Too many reports. Try again later.');
 
 const findUserById = db.prepare('SELECT id, username FROM users WHERE id = ?');
-const findUserByUsername = db.prepare('SELECT id, username FROM users WHERE username = ?');
+const findUserByUsername = db.prepare('SELECT id, username FROM users WHERE username = ? COLLATE NOCASE');
 const insertReport = db.prepare(`
   INSERT INTO reports (reporter_id, reported_id, reporter_username, reported_username, reason, details)
   VALUES (?, ?, ?, ?, ?, ?)
