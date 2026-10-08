@@ -3,7 +3,7 @@
 // solo client uses (js/engine.js). The difference is in the inputs: answers arrive over the network,
 // and each seat is sent its own redacted view (viewFor, js/trivia.js) instead of a DOM render.
 
-import { makeGame, submitGuess, allGuessed, standings, viewFor, pickQuestions, displayName, botGuess, ROUNDS } from '../js/trivia.js';
+import { makeGame, submitGuess, allGuessed, standings, viewFor, pickQuestions, livePool, dailyKey, displayName, ROUNDS } from '../js/trivia.js';
 import { QUESTIONS } from '../js/questions.js';
 import { playGame } from '../js/engine.js';
 import { recordForfeit, recordMatchResults } from './matches.js';
@@ -15,18 +15,6 @@ const RECONNECT_GRACE_MS = process.env.TEST_GRACE_MS ? Number(process.env.TEST_G
 // How long every seat has to lock in an answer once the question is up. A seat that hasn't answered by
 // then counts as no guess and scores 0.
 export const GUESS_TIME_MS = 18_000;
-// Bots lock in at a random moment in the window. They wait at least this long, and always finish this
-// long before the clock runs out, so a round never closes on a bot that hasn't answered yet.
-const BOT_MIN_DELAY_MS = 3_000;
-const BOT_MARGIN_MS = 2_000;
-
-/**
- * @typedef {Object} BotSeat
- * @property {number} seatId
- * @property {string} username
- * @property {number} elo
- * @property {number} spread Guess accuracy, see server/bots.js.
- */
 
 /**
  * @typedef {Object} LiveGame
@@ -34,8 +22,7 @@ const BOT_MARGIN_MS = 2_000;
  * @property {boolean} ranked Whether this match changes ratings.
  * @property {Map<number, number>|null} eloDeltas Rating change per seat, set once the match ends.
  * @property {import('../js/trivia.js').GameState} G
- * @property {{userId:number|null, seatId:number, elo?:number}[]} seats Frozen seat->account mapping for this match. Bots have a null userId.
- * @property {BotSeat[]} bots The seats the server plays itself.
+ * @property {{userId:number, seatId:number}[]} seats Frozen seat->account mapping for this match.
  * @property {Set<number>} disconnectedSeats Seats past their reconnect grace period. No longer waited for.
  * @property {Map<number, NodeJS.Timeout>} graceTimers Active grace-period timers, by seat id.
  * @property {Set<number>} forfeitedSeats Seats already recorded as a loss via the forfeit path.
@@ -53,32 +40,22 @@ export function hasLiveGame(roomId){ return liveGames.has(roomId); }
 
 // Called once, when a lobby room's host starts it. `seats` order is the seat id order, and that
 // mapping is frozen for the rest of the match. Players can disconnect and reconnect, but the seat list
-// never changes once a match is underway.
+// never changes once a match is underway. Every seat here is a real player — bots only ever appear in
+// solo practice (js/bots.js, driven locally by js/engine.js), never in a live server match.
 /**
  * @param {string} roomId
  * @param {{userId:number, username:string}[]} seats
  * @param {(seatId:number, payload:unknown)=>void} sendToSeat
  * @param {boolean} [ranked] Whether this match changes ratings. Defaults to casual.
- * @param {import('./bots.js').BotProfile[]} [bots] Bots filling the seats after the human ones.
  */
-export function startLiveGame(roomId, seats, sendToSeat, ranked = false, bots = []){
-  // Bot seats come after the human seats, so the human seat ids still line up with the room's seat list.
-  /** @type {BotSeat[]} */
-  const botSeats = bots.map((b, k) => ({seatId: seats.length + k, elo: b.elo, spread: b.spread, username: b.username}));
+export function startLiveGame(roomId, seats, sendToSeat, ranked = false){
   /** @type {LiveGame} */
   const game = {
     roomId,
     ranked,
     eloDeltas: null,
-    G: makeGame([
-      ...seats.map((s, i) => ({id: i, name: displayName(s.username)})),
-      ...botSeats.map(b => ({id: b.seatId, name: displayName(b.username)}))
-    ]),
-    seats: [
-      ...seats.map((s, i) => ({userId: s.userId, seatId: i})),
-      ...botSeats.map(b => ({userId: null, seatId: b.seatId, elo: b.elo}))
-    ],
-    bots: botSeats,
+    G: makeGame(seats.map((s, i) => ({id: i, name: displayName(s.username)}))),
+    seats: seats.map((s, i) => ({userId: s.userId, seatId: i})),
     disconnectedSeats: new Set(),
     graceTimers: new Map(),
     forfeitedSeats: new Set(),
@@ -99,11 +76,8 @@ export function startLiveGame(roomId, seats, sendToSeat, ranked = false, bots = 
  */
 function awaitGuesses(game){
   return new Promise(resolve => {
-    /** @type {NodeJS.Timeout[]} */
-    const botTimers = [];
     const finish = () => {
       clearTimeout(timer);
-      for(const t of botTimers) clearTimeout(t);
       game.onGuessChange = null;
       game.guessDeadline = null;
       resolve();
@@ -114,16 +88,6 @@ function awaitGuesses(game){
       const waitingOn = game.G.players.map(p => p.id).filter(id => !game.disconnectedSeats.has(id));
       if(allGuessed(game.G, waitingOn)) finish();
     };
-    // Each bot answers once, at a random point in the window, so the bots don't all lock in the moment it opens.
-    const botWindow = GUESS_TIME_MS - BOT_MIN_DELAY_MS - BOT_MARGIN_MS;
-    for(const bot of game.bots){
-      botTimers.push(setTimeout(() => {
-        const question = game.G.question;
-        if(!question) return;
-        submitGuess(game.G, bot.seatId, botGuess(question, Math.random, bot.spread));
-        game.onGuessChange?.();
-      }, BOT_MIN_DELAY_MS + Math.random() * botWindow));
-    }
     // The driver's own render() ran before the deadline existed, so re-send now that clients can count down.
     broadcastState(game);
     game.onGuessChange();
@@ -135,7 +99,7 @@ function awaitGuesses(game){
  */
 async function runGame(game){
   const { roomId } = game;
-  const questions = pickQuestions(QUESTIONS, ROUNDS);
+  const questions = pickQuestions(livePool(QUESTIONS, dailyKey()), ROUNDS);
   await playGame(game.G, {
     questions,
     render: () => broadcastState(game),
@@ -144,7 +108,7 @@ async function runGame(game){
   });
 
   if(liveGames.get(roomId) !== game) return; // room was torn down mid-match
-  recordQuestionAnswers(game.G.history, new Set(game.seats.filter(s => s.userId !== null).map(s => s.seatId)));
+  recordQuestionAnswers(game.G.history, new Set(game.seats.map(s => s.seatId)));
   const placeBySeat = new Map(standings(game.G).map(p => [p.id, p.place]));
   // A player who quit is ranked tied for last, whatever their score was, so quitting always costs rating.
   const stayedPlaces = [...placeBySeat].filter(([id]) => !game.quitSeats.has(id)).map(([, place]) => place);

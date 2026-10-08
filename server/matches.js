@@ -40,24 +40,22 @@ export function recordForfeit(roomId, userId){
 /**
  * Writes each seat's result row, and applies ELO when the match is ranked.
  * @param {string} roomId
- * Bot seats (userId null) count as opponents for the ELO maths, but have no account to write to.
- * @param {{userId:number|null, seatId:number, elo?:number}[]} seats Every seat that played this match.
+ * @param {{userId:number, seatId:number}[]} seats Every seat that played this match.
  * @param {Map<number, number>} placeBySeat Final place per seat id (1 = match winner; ties share a place).
  * @param {Set<number>} alreadyForfeitedSeatIds Seat ids already recorded via recordForfeit.
  * @param {boolean} ranked Whether this match changes ratings.
- * @returns {Map<number, number>} Rating change per human seat id. Empty for a casual match.
+ * @returns {Map<number, number>} Rating change per seat id. Empty for a casual match.
  */
 export function recordMatchResults(roomId, seats, placeBySeat, alreadyForfeitedSeatIds, ranked){
   const rated = seats.map(seat => ({
     id: seat.seatId,
     userId: seat.userId,
-    elo: seat.userId === null ? (seat.elo ?? START_ELO) : getRating(seat.userId),
+    elo: getRating(seat.userId),
     place: placeBySeat.get(seat.seatId) ?? seats.length
   }));
   const deltas = ranked ? eloChanges(rated) : new Map();
 
   for(const r of rated){
-    if(r.userId === null) continue;
     const delta = ranked ? (deltas.get(r.id) ?? 0) : null;
     if(ranked) setElo.run(Math.max(0, r.elo + (delta ?? 0)), r.userId);
     // A forfeit row was written when the player left, before the rating was known. Fill in its change now.
@@ -67,7 +65,5 @@ export function recordMatchResults(roomId, seats, placeBySeat, alreadyForfeitedS
     }
     insertResult.run(r.userId, roomId, r.place === 1 ? 'win' : 'loss', delta);
   }
-  // Bots' rating changes are thrown away, so the results screen only shows human players' changes.
-  const humanIds = new Set(rated.filter(r => r.userId !== null).map(r => r.id));
-  return new Map([...deltas].filter(([id]) => humanIds.has(id)));
+  return deltas;
 }

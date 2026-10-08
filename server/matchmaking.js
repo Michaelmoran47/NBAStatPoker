@@ -1,10 +1,9 @@
 // @ts-check
 // Ranked queue. Players wait here until enough players with similar ratings are available. The rating
 // window starts narrow and widens the longer someone waits, so a player is never stuck forever. A match
-// starts at MAX_PLAYERS, or once a player has waited BOT_FILL_AFTER_MS: then any open seats up to
-// BOT_MATCH_SIZE are filled with bots (see bots.js), so a lone player still gets a match. The queue holds
+// starts at MAX_PLAYERS, or once the wait limit is hit, as long as at least MIN_PLAYERS are ready — ranked
+// is human-only, no bot fill (see js/bots.js for the bots used in solo practice instead). The queue holds
 // no game state. Once a group is picked, ws.js turns it into an ordinary room and starts it as a ranked match.
-import { pickBots } from './bots.js';
 
 /**
  * @typedef {Object} QueueEntry
@@ -17,10 +16,8 @@ import { pickBots } from './bots.js';
 
 export const MAX_PLAYERS = 6;
 export const MAX_WAIT_MS = 45_000;
-// How long a player waits for a human partner before bots fill the match.
-export const BOT_FILL_AFTER_MS = 12_000;
-// Every ranked match has at least this many seats, human or bot.
-export const BOT_MATCH_SIZE = 3;
+// Matches rooms.js's MIN_SEATS_TO_START — a match needs at least this many real players.
+export const MIN_PLAYERS = 2;
 const BASE_WINDOW = 100;
 const WIDEN_EVERY_MS = 10_000;
 const WIDEN_STEP = 50;
@@ -63,7 +60,7 @@ function windowFor(entry, now){
  * Picks a group for the longest-waiting player and removes it from the queue. Two players are only
  * compatible if each is inside the other's window, so a player with a wide window can't pull in
  * someone who's still too far apart.
- * @param {(group: QueueEntry[], bots: import('./bots.js').BotProfile[]) => void} onMatch
+ * @param {(group: QueueEntry[]) => void} onMatch
  * @param {number} now
  */
 function tick(onMatch, now){
@@ -72,22 +69,18 @@ function tick(onMatch, now){
     // After the wait limit, rating stops mattering. Otherwise a player at one end of the rating spread
     // could wait forever, since the window never reaches the other end.
     const waitedLongEnough = now - seed.joinedAt >= MAX_WAIT_MS;
-    const botFill = now - seed.joinedAt >= BOT_FILL_AFTER_MS;
     const others = queue
       .filter(q => q !== seed && (waitedLongEnough || Math.abs(q.elo - seed.elo) <= Math.max(windowFor(seed, now), windowFor(q, now))))
       .sort((a, b) => a.joinedAt - b.joinedAt);
     const group = [seed, ...others].slice(0, MAX_PLAYERS);
-    if(group.length >= MAX_PLAYERS || botFill){
-      // Bots are only added once the seed has waited, and only to fill seats the humans left open.
-      const averageElo = group.reduce((sum, p) => sum + p.elo, 0) / group.length;
-      const bots = pickBots(averageElo, BOT_MATCH_SIZE - group.length);
+    if(group.length >= MAX_PLAYERS || (waitedLongEnough && group.length >= MIN_PLAYERS)){
       for(const p of group) queue.splice(queue.indexOf(p), 1);
-      onMatch(group, bots);
+      onMatch(group);
     }
   }
 }
 
-/** @param {(group: QueueEntry[], bots: import('./bots.js').BotProfile[]) => void} onMatch Called with each group that's ready to play, and the bots filling its open seats. */
+/** @param {(group: QueueEntry[]) => void} onMatch Called with each group that's ready to play. */
 export function startMatchmaking(onMatch){
   setInterval(() => tick(onMatch, Date.now()), TICK_MS);
 }

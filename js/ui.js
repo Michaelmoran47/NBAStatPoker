@@ -4,18 +4,16 @@
 // the match driver here. The multiplayer lobby (lobby/lobby.js) calls renderGame() with server views.
 // Both get the same markup.
 
-import { UNITS, ROUNDS, MAX_POINTS, RANK_POINTS, parseNumber, makeGuess, formatNumber, formatRounded, pickQuestions, seededRandom, dailyKey, dailyNumber, makeGame, submitGuess, viewFor } from './trivia.js';
+import { UNITS, ROUNDS, MAX_POINTS, RANK_POINTS, parseNumber, makeGuess, formatNumber, formatRounded, pickQuestions, livePool, dailyQuestions, seededRandom, dailyKey, dailyNumber, makeGame, submitGuess, viewFor } from './trivia.js';
 import { QUESTIONS } from './questions.js';
 import { playGame, ROUND_RESULT_MS } from './engine.js';
+import { BOT_ROSTER } from './bots.js';
 
 // Matches the server's GUESS_TIME_MS in server/game-rooms.js.
 const GUESS_TIME_MS = 18_000;
 
 // Length of the guess window, shown as the answer timer bar.
 const GUESS_TOTAL_MS = 18_000;
-
-// Names for the solo CPU opponents. Two are drawn at random for each match.
-const CPU_NAMES = ['Ace', 'Blaze', 'Cobra', 'Dyna', 'Echo', 'Flint', 'Glacier', 'Haze', 'Ivy', 'Jett', 'Koda', 'Lynx', 'Maverick', 'Nova', 'Onyx', 'Piper', 'Quill', 'Raven', 'Sable', 'Tempo', 'Vex', 'Wren', 'Yara', 'Zephyr'];
 
 // The number box and unit dropdown survive re-renders. Other players' answers re-render the whole
 // screen, and without this a half-typed answer would vanish.
@@ -27,6 +25,9 @@ let resultRound = null;
 let resultStart = 0;
 // Set to 'final' once the winner's confetti has fired for this match, so re-renders don't fire it again.
 let confettiDone = null;
+// The daily round whose result was last reported to the server (see reportDailyAnswer), so a re-render
+// of the same round-result screen (e.g. from the "Next question" handler) doesn't double-report it.
+let reportedRound = null;
 
 /** @type {ReturnType<typeof setInterval>|null} */
 let timerFrame = /** @type {number|null} */ (null);
@@ -547,28 +548,73 @@ let soloDeadline = /** @type {number|null} */ (null);
 let soloNext = /** @type {(() => void)|null} */ (null);
 
 /**
+ * Live-computed spread per question id (see server/question-stats.js's computedSpread), merged over
+ * the hand-tagged defaults in js/questions.js before the daily scores itself. Best-effort: a failed or
+ * slow fetch just means today's questions keep their hand-tagged spread, never blocks the match.
+ * @param {string[]} ids
+ * @returns {Promise<Record<string, number>>}
+ */
+async function fetchDailySpreads(ids){
+  try{
+    const res = await fetch(`/api/daily/spreads?ids=${ids.map(encodeURIComponent).join(',')}`);
+    if(!res.ok) return {};
+    return (await res.json()).spreads ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Reports the human's result for one daily round to the server — anonymous, same as
+ * question_answers' existing design for multiplayer answers: just the question and how far off the
+ * guess was, no user id. Fire-and-forget, so a slow or failed request never holds up the game.
+ * @param {import('./trivia.js').RoundResult} r
+ */
+function reportDailyAnswer(r){
+  const mine = r.entries.find(e => e.playerId === 0);
+  if(!mine) return;
+  fetch('/api/daily/answer', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      questionId: r.question.id,
+      guess: mine.value,
+      pctOff: mine.pctOff,
+      questionText: r.question.text,
+      answer: r.question.answer
+    })
+  }).catch(() => {});
+}
+
+/**
  * Starts a solo match. The human (id 0) plays alone against two CPU seats (ids 1 and 2). The same
  * playGame() driver the server uses runs it here, with local timers and CPU answers.
  */
 export async function startSolo(opts = {}){
   resetDraft();
   soloDaily = Boolean(opts.daily);
+  reportedRound = null;
   // The daily is a solo challenge: no CPU opponents, just you trying to score as many points as possible.
-  // It uses the same five questions for everyone on the same day.
-  const cpuNames = soloDaily ? [] : pickQuestions(CPU_NAMES.map(name => ({name})), 2).map(c => c.name);
+  // It uses the same five questions for everyone on the same day. Practice draws two bots at random
+  // from the full difficulty roster (see js/bots.js), so who you're up against varies run to run.
+  const cpus = soloDaily ? [] : pickQuestions(BOT_ROSTER, 2);
   const G = makeGame(
-    [{id: 0, name: 'You'}, ...cpuNames.map((name, i) => ({id: i + 1, name}))],
+    [{id: 0, name: 'You'}, ...cpus.map((cpu, i) => ({id: i + 1, name: cpu.name}))],
     soloDaily ? 'closeness' : 'rank'
   );
-  const questions = soloDaily
-    ? pickQuestions(QUESTIONS, ROUNDS, seededRandom(dailyKey()))
-    : pickQuestions(QUESTIONS, ROUNDS);
+  let questions = soloDaily
+    ? dailyQuestions(QUESTIONS, ROUNDS, seededRandom(dailyKey()), dailyKey())
+    : pickQuestions(livePool(QUESTIONS, dailyKey()), ROUNDS);
+  if(soloDaily){
+    const computed = await fetchDailySpreads(questions.map(q => q.id));
+    questions = questions.map(q => computed[q.id] !== undefined ? {...q, spread: computed[q.id]} : q);
+  }
   await playGame(G, {
     questions,
     render: () => paintSolo(G),
     // The daily waits for the player after each round. Practice games use the timed pause instead.
     awaitNext: soloDaily ? () => new Promise(resolve => { soloNext = resolve; paintSolo(G); }) : undefined,
-    botIds: cpuNames.map((_, i) => i + 1),
+    bots: cpus.map((cpu, i) => ({id: i + 1, spread: cpu.spread})),
     awaitGuesses: () => new Promise(resolve => {
       // The daily has no clock: the round waits until you lock in. Practice games time out.
       soloDeadline = soloDaily ? null : Date.now() + GUESS_TIME_MS;
@@ -583,8 +629,9 @@ export async function startSolo(opts = {}){
       paintSolo(G); // show the timer as soon as the window opens
     })
   });
-  // Marks today's daily as played, so the menu button can stop highlighting it. There's no
-  // server record of solo games at all (daily included) — this is the only record that exists.
+  // Marks today's daily as played, so the menu button can stop highlighting it. This is purely a
+  // per-browser UI nicety — the server-side question_answers rows reportDailyAnswer sends are
+  // anonymous, so there's still no record anywhere of *who* played, just how each question went.
   if(soloDaily){
     try{ localStorage.setItem(`dailyPlayed:${dailyKey()}`, '1'); } catch {
       // Private windows can refuse storage. Worst case the menu button stays highlighted.
@@ -600,6 +647,10 @@ let soloDaily = false;
 function paintSolo(G){
   const over = G.stage === 'game-over';
   const view = viewFor(G, 0);
+  if(soloDaily && G.stage === 'round-result' && reportedRound !== G.roundNum){
+    reportedRound = G.roundNum;
+    if(view.lastResult) reportDailyAnswer(view.lastResult);
+  }
   renderGame(view, {
     mode: 'solo',
     daily: soloDaily,

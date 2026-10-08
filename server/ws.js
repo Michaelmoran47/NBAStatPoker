@@ -191,7 +191,7 @@ function makeSendToSeat(roomId){
 // Turns a group picked by the ranked queue into a normal room, readies everyone, and starts it as a
 // ranked match. Matchmaking has already chosen the players, so there's no ready-up step.
 /** @param {import('./matchmaking.js').QueueEntry[]} group */
-function startRankedMatch(group, bots){
+function startRankedMatch(group){
   const [host, ...rest] = group;
   const room = createRoom(host.userId, host.username);
   for(const p of rest) joinRoom(room.id, p.userId, p.username);
@@ -203,8 +203,7 @@ function startRankedMatch(group, bots){
     room.id,
     room.seats.map(s => ({userId: s.userId, username: s.username})),
     makeSendToSeat(room.id),
-    true,
-    bots
+    true
   );
 }
 

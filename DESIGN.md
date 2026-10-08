@@ -38,7 +38,7 @@ Colour is the main signal for how a guess landed. Always pair it with a word or 
 - **Timer bar (`.timer`):** a thin bar that drains left to right over the guess window (18s) and the result pause (4.5s). Green while more than half is left, yellow from half down to 20%, and red for the last 20%. The results bar stays yellow.
 - **Result rows (`.closeness .row`):** ranked closest first, one row per player. Tiers: gold is exact, green is within 3%, yellow is within 10%. Other rows are plain.
 - **Player strip:** names only, centred, sized to their text. No counters while a match is running.
-- **Standings:** place badge first (medal for 1–3), then name, then the rating change in green (gain) or red (loss), or a dash for casual and solo games, and for bot seats.
+- **Standings:** place badge first (medal for 1–3), then name, then the rating change in green (gain) or red (loss), or a dash for casual and solo games.
 - **Lists and lobbies:** compact rows, one per person or room. Name on the left, status or rating on the right. Rows are tappable across the full width.
 - **Cards (`.start-card`, `.guess-card`, `.result-card`):** `--card` with 20px radius. No shadow.
 

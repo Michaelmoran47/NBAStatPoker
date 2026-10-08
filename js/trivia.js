@@ -14,6 +14,18 @@
  * @property {string} text
  * @property {number} answer
  * @property {string} [label] Unit shown next to the answer, e.g. "miles". Optional.
+ * @property {number} [spread] How much of a shot in the dark this question inherently is, for the
+ *   daily's closeness scoring (see pointsFor). 1 (the default when omitted) is a typical question.
+ *   Below 1 tightens the curve, for a precise fact most people either know or can pin down closely
+ *   ("rings on the Olympic flag"), so a big miss costs more. Above 1 loosens it, for a wide-range
+ *   estimate nobody has real intuition for ("square miles of the Pacific Ocean"), so a rough guess
+ *   isn't punished as hard as it would be on an easier question. Ignored by rank-scored matches
+ *   (ranked, practice), which score by place and don't use pointsFor at all. Hand-tagged at authoring
+ *   time as a starting guess; see server/question-stats.js for how a question's own played results
+ *   can override this once there's enough data to trust it over the guess.
+ * @property {string} [releaseDate] UTC date ("YYYY-MM-DD", see dailyKey) this question debuts in the
+ *   daily. Omit for a question that's always been in the shared pool. See livePool/dailyQuestions below
+ *   for exactly how this gates which pool a question is drawn from on a given day.
  */
 
 /**
@@ -116,11 +128,16 @@ export function makeGuess(text, unitKey){
   return {text: display ?? String(text ?? '').trim(), unit: unitKey, value};
 }
 
-// Up to this much percent-off, scoring is the original, unmodified "1 point per 1% off" rule,
-// rescaled to whatever MAX_POINTS actually is (POINTS_LOST_RATE=1 means exactly that rate; it's
-// expressed as a rate rather than a literal point value so it stays proportional if MAX_POINTS
-// changes again). NEAR_MISS_POINTS is what that rule gives right at the threshold, which is where
-// the tail below picks up.
+// Baseline (spread = 1) near-miss threshold. Up to this much percent-off, scoring is the original,
+// unmodified "1 point per 1% off" rule, rescaled to whatever MAX_POINTS actually is (POINTS_LOST_RATE=1
+// means exactly that rate; it's expressed as a rate rather than a literal point value so it stays
+// proportional if MAX_POINTS changes again). NEAR_MISS_POINTS is what that rule gives right at the
+// threshold, which is where the tail below picks up — and, importantly, stays the *same* value (50)
+// no matter a question's spread (see pointsFor), since rate scales inversely with how far out the
+// threshold itself moves. That's what makes spread actually work: a harder question's threshold sits
+// at a bigger raw percent-off, but the rate is correspondingly gentler, so you land on the same score
+// at that boundary either way — spread changes how much raw wrongness it takes to get there, not what
+// score "a reasonable miss for this question" is worth.
 //
 // Widened from 20% to 50% after live testing turned up a real clustering problem: in log-ratio
 // terms (what the tail below uses), "33% off" and "literally double the answer" are nearly the same
@@ -131,37 +148,57 @@ export function makeGuess(text, unitKey){
 // not to carry everyday "a bit off" guesses too. Widening the linear zone covers that band with the
 // one rule that's actually supposed to carry it, and leaves the tail doing only what it was for:
 // order-of-magnitude misses.
-const NEAR_MISS_THRESHOLD = 0.5;
+// Exported so server/question-stats.js can turn a question's measured median % off back into a spread
+// value using the exact same baseline this scoring curve uses — see pointsFor's spread param.
+export const NEAR_MISS_THRESHOLD = 0.5;
 const POINTS_LOST_RATE = 1;
 const NEAR_MISS_POINTS = MAX_POINTS * (1 - POINTS_LOST_RATE * NEAR_MISS_THRESHOLD);
 // Beyond the threshold, a guess that's wrong by an order of magnitude or more still earns
 // something: points taper off on a log10(guess/answer) scale instead of hitting 0 almost
-// immediately, down to nothing at TAIL_LOG_DECADES decades off (100x, at the default 2).
+// immediately, down to nothing at TAIL_LOG_DECADES decades off.
 // This only matters for the wide-range estimation questions (areas, populations, distances) this
 // threshold was built for — see HANDOFF.md for the reasoning and the graphs that led here.
-const TAIL_LOG_DECADES = 2;
+//
+// Was 2 (100x off to reach 0). Too gentle in practice: everything from "75% off" through a literal
+// 10x-wrong guess landed in a cramped ~27-48 band, so most non-great guesses scored nearly the same
+// "middle" number regardless of how wrong they actually were. 1.3 keeps a sliver of credit for an
+// honest order-of-magnitude estimate (10x off still scores 13) but reaches 0 by ~20x instead of 100x,
+// which spreads that same real-world range of guesses across the 0-48 band instead of bunching it up.
+const TAIL_LOG_DECADES = 1.3;
 
 /**
- * Points from a guess. Perfect is MAX_POINTS. Within NEAR_MISS_THRESHOLD (50%) off, points drop at
- * POINTS_LOST_RATE% of MAX_POINTS per 1% off — the original, unmodified "1 point per 1% off" rule,
- * just rescaled to whatever MAX_POINTS is. Past that, it switches to a forgiving log-scale tail so
- * an order-of-magnitude estimate on a huge-scale question still scores something instead of 0.
+ * Points from a guess. Perfect is MAX_POINTS. Within the near-miss threshold, points drop at a fixed
+ * rate per 1% off — the original, unmodified "1 point per 1% off" rule, just rescaled to whatever
+ * MAX_POINTS is (see NEAR_MISS_POINTS above for how `spread` changes that rate). Past the threshold,
+ * it switches to a forgiving log-scale tail so an order-of-magnitude estimate on a huge-scale question
+ * still scores something instead of 0.
  * @param {number|null} value
  * @param {number} answer
+ * @param {number} [spread] The question's own difficulty multiplier (Question.spread, default 1).
+ *   Stretches how much raw percent-off it takes to reach the near-miss threshold and the tail's zero
+ *   point — a genuine shot-in-the-dark question (spread > 1) tolerates a much bigger raw miss before
+ *   losing the same points an easy/precise question (spread < 1) would for a much smaller one. The
+ *   point-loss rate inside the threshold scales inversely with spread, so NEAR_MISS_POINTS (the score
+ *   right at that boundary) lands on the same value regardless of spread — only the raw percent-off
+ *   it takes to get there changes. Clamped to keep the curve well-behaved at extreme spread values.
  * @returns {number}
  */
-export function pointsFor(value, answer){
+export function pointsFor(value, answer, spread = 1){
   if(value === null) return 0;
+  const threshold = Math.min(0.95, NEAR_MISS_THRESHOLD * spread);
+  const rate = POINTS_LOST_RATE / spread;
+  const tailDecades = Math.max(0.3, TAIL_LOG_DECADES * spread);
+
   const ratio = value / answer;
   const pctOff = Math.abs(ratio - 1);
-  if(pctOff <= NEAR_MISS_THRESHOLD) return Math.max(0, Math.round(MAX_POINTS * (1 - POINTS_LOST_RATE * pctOff)));
+  if(pctOff <= threshold) return Math.max(0, Math.round(MAX_POINTS * (1 - rate * pctOff)));
 
   // The threshold sits at a different log-ratio depending on direction (1.2x vs 0.8x), since
   // percent-off is itself asymmetric that way — the tail picks up from wherever that actually is,
   // so there's no jump at the seam.
-  const thresholdLogError = Math.abs(Math.log10(ratio > 1 ? 1 + NEAR_MISS_THRESHOLD : 1 - NEAR_MISS_THRESHOLD));
+  const thresholdLogError = Math.abs(Math.log10(ratio > 1 ? 1 + threshold : 1 - threshold));
   const logError = Math.abs(Math.log10(ratio));
-  const frac = (logError - thresholdLogError) / (TAIL_LOG_DECADES - thresholdLogError);
+  const frac = (logError - thresholdLogError) / (tailDecades - thresholdLogError);
   return Math.max(0, Math.round(NEAR_MISS_POINTS * (1 - frac)));
 }
 
@@ -194,14 +231,6 @@ export function makeGame(seats, scoring = 'rank'){
 }
 
 /**
- * Picks `count` distinct questions at random. Used once per match so no question repeats.
- * @template T
- * @param {T[]} bank
- * @param {number} count
- * @param {() => number} [random]
- * @returns {T[]}
- */
-/**
  * A repeatable random source from a text seed, so the same seed always gives the same sequence. The
  * daily game uses today's date as the seed, so every player gets the same questions.
  * @param {string} seed
@@ -230,6 +259,14 @@ export function dailyNumber(now = new Date()){
   return Math.floor((today - first) / 86400000) + 1;
 }
 
+/**
+ * Picks `count` distinct questions at random. Used once per match so no question repeats.
+ * @template T
+ * @param {T[]} bank
+ * @param {number} count
+ * @param {() => number} [random]
+ * @returns {T[]}
+ */
 export function pickQuestions(bank, count, random = Math.random){
   const pool = bank.slice();
   for(let i = pool.length - 1; i > 0; i--){
@@ -237,6 +274,35 @@ export function pickQuestions(bank, count, random = Math.random){
     [pool[i], pool[j]] = [pool[j], pool[i]];
   }
   return pool.slice(0, Math.min(count, pool.length));
+}
+
+/**
+ * The shared pool ranked, practice, and a daily's non-debut rounds all draw from: everything except a
+ * question still staged for a future debut, or debuting in today's daily specifically. A question with
+ * no releaseDate has always been live. One that debuted on an earlier day promotes into this pool
+ * automatically the moment the date rolls over — there's no separate "promote" step to run.
+ * @param {Question[]} bank
+ * @param {string} todayKey From dailyKey().
+ * @returns {Question[]}
+ */
+export function livePool(bank, todayKey){
+  return bank.filter(q => !q.releaseDate || q.releaseDate < todayKey);
+}
+
+/**
+ * The daily's question set: today's debut(s), if any, guaranteed a slot, with the rest filled at
+ * random from the live pool. Without this, a debut question tagged for today could just as easily not
+ * get picked at all, which defeats the point of staging it.
+ * @param {Question[]} bank
+ * @param {number} count
+ * @param {() => number} random
+ * @param {string} todayKey From dailyKey().
+ * @returns {Question[]}
+ */
+export function dailyQuestions(bank, count, random, todayKey){
+  const debuts = bank.filter(q => q.releaseDate === todayKey).slice(0, count);
+  const rest = pickQuestions(livePool(bank, todayKey), count - debuts.length, random);
+  return pickQuestions([...debuts, ...rest], count, random);
 }
 
 /**
@@ -333,7 +399,7 @@ export function finishRound(G){
   /** @type {RoundEntry[]} */
   const entries = measured.map(e => ({
     ...e,
-    points: byPlace ? (byPlace.get(e.playerId) ?? 0) : pointsFor(e.value, question.answer)
+    points: byPlace ? (byPlace.get(e.playerId) ?? 0) : pointsFor(e.value, question.answer, question.spread)
   }));
 
   const scored = entries.filter(e => e.pctOff !== null);
@@ -396,7 +462,6 @@ export function standings(G){
  * @param {number} viewerId
  */
 export function viewFor(G, viewerId){
-  const closed = G.stage === 'round-result' || G.stage === 'game-over';
   return {
     you: viewerId,
     scoring: G.scoring,
@@ -413,8 +478,9 @@ export function viewFor(G, viewerId){
     yourGuess: G.guesses[viewerId]?.text ?? null,
     yourUnit: G.guesses[viewerId]?.unit ?? '',
     lastResult: G.history[G.history.length - 1] ?? null,
-    // Only the closed round's guesses are shown. The open round's stay hidden.
-    history: closed ? G.history : G.history.slice(0, -1),
+    // finishRound() only ever pushes a round onto history once it's fully closed and scored, so there's
+    // no "open round" entry to hide here — every entry in G.history is a finished round, full stop.
+    history: G.history,
     standings: G.stage === 'game-over' ? standings(G) : null
   };
 }
@@ -452,7 +518,11 @@ export function eloChanges(seats){
  * @returns {Guess}
  */
 export function botGuess(question, random = Math.random, spread = 0.3){
-  const factor = 1 + (random() * 2 - 1) * spread;
+  let factor = 1 + (random() * 2 - 1) * spread;
+  // A wide spread (dumb bots go past 1) swings this negative or to zero sometimes. Reflecting it back
+  // positive — rather than flooring every negative roll to the same constant — keeps guesses varied
+  // instead of a quarter of a very-dumb bot's guesses landing on the exact same number.
+  if(factor < 0.02) factor = Math.abs(factor) + 0.02;
   const raw = question.answer * factor;
   // Whole-number guesses unless the answer is small enough that a decimal is part of it.
   const value = question.answer >= 10 ? Math.round(raw) : Math.round(raw * 100) / 100;

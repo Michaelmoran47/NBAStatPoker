@@ -14,7 +14,7 @@ import { passwordResetRouter } from './password-reset.js';
 import { reportsRouter } from './reports.js';
 import { socialRouter } from './social.js';
 import { attachWebSocketServer } from './ws.js';
-import { adminRouter } from './question-stats.js';
+import { adminRouter, dailyRouter } from './question-stats.js';
 import { db } from './db.js'; // creates the DB file + tables on first run, as a side effect
 import { SqliteSessionStore } from './session-store.js';
 
@@ -62,6 +62,7 @@ app.use('/api', authRouter);
 app.use('/api', passwordResetRouter);
 app.use('/api', reportsRouter);
 app.use('/api', socialRouter);
+app.use('/api', dailyRouter); // daily reporting + live-computed spreads, see server/question-stats.js
 app.use(adminRouter); // owner-only stats page and data, see server/question-stats.js
 
 // Public, non-secret config the client needs — a Google OAuth Client ID is meant to

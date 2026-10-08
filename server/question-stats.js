@@ -1,15 +1,21 @@
 // @ts-check
 // Per-question statistics for the game's author, so you can see how players actually do on each
-// question. Only human answers in multiplayer matches are recorded (bots are excluded), and each row holds
-// just the question id, how far off the guess was, and when. There's no user id, so the rows can't be
-// traced back to a player. The stats page and its data are shown only to the account named by
-// ADMIN_USERNAME in server/.env. Everyone else gets a 404, so the page's existence isn't revealed.
+// question. Every human answer — multiplayer matches (bots excluded) and now the daily too, via
+// dailyRouter below — lands in the same question_answers table: just the question id, how far off the
+// guess was, and when. There's no user id, so no row can be traced back to a player.
+//
+// adminRouter's stats page and its data are shown only to the account named by ADMIN_USERNAME in
+// server/.env; everyone else gets a 404, so the page's existence isn't revealed. dailyRouter, by
+// contrast, is reachable by any signed-in player — it's what lets the daily report its own guesses and
+// read back a question's live-computed spread (computedSpread) before scoring.
 
 import { Router } from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db } from './db.js';
 import { QUESTIONS } from '../js/questions.js';
+import { NEAR_MISS_THRESHOLD } from '../js/trivia.js';
+import { createLimiter, limitRoute, userOrIp } from './rate-limit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -58,6 +64,36 @@ function median(sorted){
   if(sorted.length === 0) return null;
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+// Once a question has this many real guesses on record, its spread is computed from the data instead
+// of the hand-tagged guess in js/questions.js — real results beat an educated guess. Below this, the
+// sample's too small to trust (a couple of wildly-off guesses on a question's first day could swing it
+// wildly); the hand-tagged value carries it until then.
+const MIN_SAMPLES_FOR_COMPUTED_SPREAD = 10;
+// Keeps one freak early session (or a flood of joke guesses) from sending a question's curve somewhere
+// pointsFor was never designed to handle well, even past MIN_SAMPLES_FOR_COMPUTED_SPREAD.
+const COMPUTED_SPREAD_BOUNDS = {min: 0.3, max: 2.5};
+
+const pctOffForQuestion = db.prepare(`
+  SELECT pct_off FROM question_answers WHERE question_id = ? AND pct_off IS NOT NULL ORDER BY pct_off
+`);
+
+/**
+ * A question's difficulty multiplier (Question.spread), computed from real played results — ranked,
+ * practice, and the daily all feed the same question_answers table — instead of the hand-tagged guess
+ * in js/questions.js, once there's enough data to trust it. Solves for the spread that puts the
+ * *median* real guess right at the near-miss threshold: a question people routinely guess within 15%
+ * of computes to a tight spread; one where the median guess is 90% off computes to a loose one.
+ * @param {string} questionId
+ * @returns {number|null} Null below MIN_SAMPLES_FOR_COMPUTED_SPREAD — caller falls back to the
+ *   question's own hand-tagged spread (or the default of 1).
+ */
+export function computedSpread(questionId){
+  const rows = /** @type {{pct_off:number}[]} */ (pctOffForQuestion.all(questionId));
+  if(rows.length < MIN_SAMPLES_FOR_COMPUTED_SPREAD) return null;
+  const m = /** @type {number} */ (median(rows.map(r => r.pct_off)));
+  return Math.min(COMPUTED_SPREAD_BOUNDS.max, Math.max(COMPUTED_SPREAD_BOUNDS.min, m / NEAR_MISS_THRESHOLD));
 }
 
 const dailyRows = db.prepare(`
@@ -173,4 +209,45 @@ adminRouter.get('/api/admin/question-stats/:id/distribution', requireAdmin, (req
 
 adminRouter.get('/admin/stats', requireAdmin, (req, res) => {
   res.sendFile(path.join(__dirname, 'admin', 'stats.html'));
+});
+
+// Everyday endpoints the daily client itself calls — unlike adminRouter above, these are reachable by
+// any signed-in player, not just ADMIN_USERNAME.
+export const dailyRouter = Router();
+
+// GET /api/daily/spreads?ids=a,b,c — the live-computed spread (see computedSpread) for each id that
+// has enough data to trust, omitting ids that don't. The daily fetches this once at the start of a
+// match and merges it over the hand-tagged defaults baked into js/questions.js before scoring.
+dailyRouter.get('/daily/spreads', (req, res) => {
+  const ids = typeof req.query.ids === 'string' ? req.query.ids.split(',').filter(Boolean) : [];
+  /** @type {Record<string, number>} */
+  const spreads = {};
+  for(const id of ids){
+    const s = computedSpread(id);
+    if(s !== null) spreads[id] = s;
+  }
+  res.json({spreads});
+});
+
+// A handful of rounds a minute is plenty for one person playing through the one daily match that
+// exists per day — this just guards against the endpoint being hammered, not normal play.
+const dailyAnswerLimit = limitRoute(createLimiter({max: 30, windowMs: 60 * 1000}), userOrIp, 'Too many requests.');
+
+// POST /api/daily/answer {questionId, guess, pctOff, questionText, answer} — one call per round the
+// daily closes. Requires a session (the app already requires an account to play at all) but never
+// records who, same as question_answers' existing no-user-id design for multiplayer answers — these
+// rows exist purely to measure the question, not the player.
+dailyRouter.post('/daily/answer', dailyAnswerLimit, (req, res) => {
+  if(!req.session?.userId) return res.status(401).json({error: 'Not logged in.'});
+  const {questionId, guess, pctOff, questionText, answer} = req.body ?? {};
+  if(typeof questionId !== 'string' || !QUESTIONS.some(q => q.id === questionId)){
+    return res.status(400).json({error: 'Unknown question.'});
+  }
+  if(guess !== null && typeof guess !== 'number') return res.status(400).json({error: 'Invalid guess.'});
+  if(pctOff !== null && typeof pctOff !== 'number') return res.status(400).json({error: 'Invalid pctOff.'});
+  if(typeof questionText !== 'string' || typeof answer !== 'number'){
+    return res.status(400).json({error: 'Invalid question data.'});
+  }
+  insertAnswer.run(questionId, pctOff, guess, questionText, answer);
+  res.status(201).json({ok: true});
 });
